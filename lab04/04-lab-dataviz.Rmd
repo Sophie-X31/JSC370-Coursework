@@ -50,7 +50,7 @@ download.file(
 ```
 
 ```{r, eval=TRUE, echo=FALSE, message=FALSE}
-met <- data.table::fread("met_all.gz")
+met <- data.table::fread("../lab03/met_all.gz")
 ```
 
 ### 2. Prepare the data.
