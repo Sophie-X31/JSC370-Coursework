@@ -1,0 +1,256 @@
+---
+title: "Lab 03 - Exploratory Data Analysis"
+date: "January 22, 2025"
+---
+
+```{r setup, message=FALSE, echo=FALSE, warning=FALSE}
+#install.packages(c("data.table","leaflet", "reticulate", "lubridate"))
+library(data.table)
+library(leaflet)
+library(lubridate)
+#library(reticulate) #if you want to use Python code chunks
+
+
+#install.packages("tidyverse") # ***has problems, needs to use tools/install packages
+library(tidyverse)
+```
+
+# Learning Goals
+
+- Read in and get familiar with the meteorology dataset  
+- Step through the EDA "checklist" presented in the class slides
+- Practice making exploratory graphs
+
+# Lab Description
+
+We will work with the meteorological data presented in lecture. Recall the dataset consists of weather station readings in the contiguous US. 
+
+**The objective of the lab is to find the weather station with the highest elevation and look at patterns in the time series of its wind speed and temperature.**
+
+# Steps
+
+### 1. Read in the data
+
+First download and then read in with `data.table` function `fread()`
+
+
+```{r, echo=TRUE, message=FALSE, eval=FALSE}
+# ***Uploaded manually to resolve issue
+# download.file(
+ # "https://raw.githubusercontent.com/JSC370/JSC370-2025/main/data/met/met_all.gz",
+  # destfile = "met_all.gz",
+  # method   = "curl",
+  # timeout  = 60
+  # )
+```
+
+```{r}
+met <- data.table::fread("met_all.gz")
+```
+
+### 2. Check the dimensions, headers, footers. How many columns, rows are there?
+
+- Note you may use R or Python
+
+```{r}
+# <place your code here>
+print(dim(met))
+print(head(met))
+print(tail(met)) 
+```
+
+- _There are 2,377,343 rows or observations, and 30 columns or variables._ 
+
+
+### 3. Take a look at the variables in the dataset. What kind of variables are there?
+
+```{r}
+# <place your code here>
+str(met)
+```
+
+- _There are integer variables like the station number (USAFID), datetime information (year, month, day, hour, min); and numerical variables about the location (lat, lon), temperature, etc; as well as character variables for information like sky condition._
+
+
+### 4. Take a closer look at the key variables. 
+
+- Are there missing data? If so, make sure they are coded correctly. 
+- Are there any unusual values that look suspicious? Recall the temperature values in the lecture.
+
+
+```{r}
+# <place your code here>
+
+# Check All Variables
+# print(summary(met))
+
+# Check Key Variables
+print(summary(met$elev))
+print(summary(met$wind.sp))
+print(summary(met$temp))
+
+# Check Location
+print(summary(met$lat))
+print(summary(met$lon))
+
+# Change Encoding
+met$elev[met$elev == 9999] <- NaN
+print(summary(met$elev))
+```
+
+- _The summary statistics show that there are lots of missing values in ceiling height, wind speed, visual distance, temperature, dew point, atmosphere pressure, relative humidity. Moreover the maximum value of 9999 for elevation seems to be an encoding for missing values, and minimum value of -40 for temperature also looks suspicious._
+
+
+### 5. Check the data against an external data source and make adjustments.
+
+- Check that the range of elevations make sense.
+- Google or ChatGPT is your friend here.
+- Fix any problems that arise in your checks.
+
+```{r}
+# <place your code here>
+
+# Remove Data with Error
+met_ss <- met[temp == -40.00, .(hour, lat, lon, elev, wind.sp)]
+print(dim(met_ss))
+print(summary(met_ss))
+met <- met[temp > -40]
+
+# Remove Missing Values
+mean(is.na(met))
+met_clean <- met[!is.nan(met$wind.sp) & !is.nan(met$temp) & !is.nan(met$elev), ]
+```
+
+- _By taking a closer look at the temperature, it seems like all the values of -40 were collected from the same location for 36 times. Double checking the location with GPT, we can tell this is a case of data error. Thus, we removed these entries along with other observations that have missing values._
+
+
+### 6. Calculate summary statistics
+
+Remember to keep the initial question in mind. We want to pick out the weather station with maximum elevation and examine its wind speed and temperature.
+
+Some ideas: 
+1. select the weather station with maximum elevation; 
+2. look at the correlation between temperature and wind speed; and 
+3. look at the correlation between temperature and wind speed with hour and day of the month.
+
+```{r}
+# <place your code here>
+
+# Find the Station with Maximum Elevation
+setorder(met_clean, -elev)
+max_elev <- met_clean[1]$elev
+highest <- met_clean[elev == max_elev, .(USAFID, hour, day, elev, wind.sp, temp)]
+print(summary(highest))
+
+# Compute Correlation
+cor_temp_wind <- cor(highest$temp, highest$wind.sp, use = "complete")
+print(cor_temp_wind)
+
+# Consider Time Series Data
+cor_temp_hour <- cor(highest$temp, highest$hour, use = "complete")
+cor_temp_day <- cor(highest$temp, highest$day, use = "complete")
+cor_wind_hour <- cor(highest$wind.sp, highest$hour, use = "complete")
+cor_wind_day <- cor(highest$wind.sp, highest$day, use = "complete")
+print(c(cor_temp_day, cor_temp_hour, cor_wind_day, cor_wind_hour))
+```
+
+### 7. At what elevation is the highest weather station?
+
+```{r}
+# <place your code here>
+print(max_elev)
+```
+
+- _The weather station 720385 has the highest elevation at 4113m. The temperature and hour has a stronger correlation than with day, and the wind speed and day has a stronger correlation than with hour._
+
+### 8. Exploratory graphs: Distributions
+
+We should look at the distributions of all of the key variables (elevation, temp, wind speed) to make sure there are no remaining issues with the data.
+
+```{r }
+# <place your code here>
+
+# par(mfrow = c(1, 3))
+
+# Elevation
+# met_clean$log_elev <- log(met_clean$elev + 1)
+hist(met_clean$elev, 
+     main = "Histogram of Elevation", 
+     xlab = "Elevation (m)", 
+     col = "skyblue", 
+     border = "white",
+     breaks = 80)
+
+# Temperature
+hist(met_clean$temp, 
+     main = "Histogram of Temperature", 
+     xlab = "Temperature (°C)", 
+     col = "orange", 
+     border = "white",
+     breaks = 80)
+
+# Wind Speed
+# met_clean$log_windsp <- log(met_clean$wind.sp + 1)
+hist(met_clean$wind.sp, 
+     main = "Histogram of Wind Speed", 
+     xlab = "Wind Speed (m/s)", 
+     col = "lightgreen", 
+     border = "white",
+     breaks = 80)
+```
+
+One thing we should consider for later analyses is to log transform wind speed and elevation as the are very skewed.
+
+- _Both elevation and wind speed have skewed distribution, while temperature shows a almost perfect normal distribution. The graphs are reasonable, and there are no obvious remaining issues in the data._
+
+### 9. Exploratory graphs: Time Series
+
+Look at the time series of temperature and wind speed at this location. For this we will need to create a date-time variable for the x-axis.
+
+```{r}
+# <place your code here>
+met_clean$date <- with(met_clean, ymd_hm(paste(year, month, day, hour, min, spe='')))
+summary(met_clean$date)
+```
+
+With the date-time variable we can plot the time series of temperature and wind speed. Summarize any trends that you see in these time series plots.
+
+```{r}
+# <place your code here>
+met_clean <- met_clean[order(date)]
+plot(met_clean$date, met_clean$temp, type = "l")
+plot(met_clean$date, met_clean$wind.sp, type = "l")
+```
+
+- _The temperatures are mostly distributed between 0 and 40 degrees with some outliers. The temp plot also corresponds to the correlation computation, we can see the hourly trends are much more obvious than the change throughout the month. On the other hand, there is one outlier sticking out in the wind speed time series plot that might be worth investigating._
+
+
+### 10. Exploratory graphs: Map
+
+Where is the weather station with highest elevation located? (i.e. make a map!)
+
+```{r}
+# <place your code here>
+# hint: make use of leaflet
+
+# Identify Station
+setorder(met_clean, -elev)
+highest_elev_station <- met_clean[1]
+lat <- highest_elev_station$lat
+lon <- highest_elev_station$lon
+elev <- highest_elev_station$elev
+station_name <- highest_elev_station$USAFID
+
+# Create a leaflet map
+leaflet() %>%
+  addTiles() %>%
+  addMarkers(
+    lng = lon, lat = lat,
+    popup = paste(
+      "<b>Station Name:</b>", station_name, "<br>",
+      "<b>Elevation:</b>", elev, "m"
+    ),
+    label = paste("Highest Elevation: ", elev, "m")
+  ) %>%
+  setView(lng = lon, lat = lat, zoom = 10)
+```

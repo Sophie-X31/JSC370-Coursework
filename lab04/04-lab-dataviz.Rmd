@@ -1,0 +1,290 @@
+---
+title: "Lab 04 - Data Visualization"
+output:
+  html_document:
+    html_preview: false
+link-citations: yes
+---
+
+
+
+```{r setup, message=FALSE, warning=FALSE}
+library(data.table)
+library(leaflet)
+library(tidyverse)
+library(ggplot2)
+```
+
+# Deliverables
+
+- Answer questions below, knit to html and submit to Quercus.
+
+# Learning Goals
+
+- Read in and prepare the meteorological dataset
+- Create several graphs with different `geoms()` in `ggplot2`
+- Create a facet graph
+- Conduct some customizations of the graphs
+- Create a more detailed map using `leaflet()`
+
+
+# Lab Description
+
+We will again work with the meteorological data from last week.
+
+**The objective of the lab is to examine the association between weekly average dew point temperature and wind speed in four regions of the US and by elevation.**
+
+# Steps
+
+### 1. Read in the data
+
+First download and then read in with data.table:fread()
+
+```{r, echo=TRUE, message=FALSE, eval=FALSE}
+download.file(
+  "https://raw.githubusercontent.com/JSC370/JSC370-2025/main/data/met/met_all.gz",
+  destfile = "met_all.gz",
+  method   = "curl",
+  timeout  = 60
+  )
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+met <- data.table::fread("met_all.gz")
+```
+
+### 2. Prepare the data.
+
+- Based on last week's lab, remove suspect/incorrect observations.
+- Generate a date variable.
+- Using the `data.table::week` function, keep the observations of the first week of the month.
+- Compute the mean by station of the variables `temp`, `rh`, `wind.sp`, `vis.dist`, `dew.point`, `lat`,`lon`, and `elev`.
+- Create a categorical variable for elevation (break point at 252 m)
+- Create a region variable for NW, SW, NE, SE based on lon = -98.00 and lat = 39.71 degrees
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Remove Incorrect Observations
+met <- met[temp > -17][elev == 9999, elev := NA]
+
+# Observations of First Week
+met[, week := data.table::week(as.Date(paste(year, month, day, sep = "-")))]
+met_first_week <- met[week == min(week, na.rm=TRUE)]
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Mean Dataframe
+met_avg <- met_first_week[, .(
+  temp = mean(temp, na.rm=TRUE),
+  rh = mean(rh, na.rm=TRUE),
+  wind.sp = mean(wind.sp, na.rm=TRUE),
+  vis.dist = mean(vis.dist, na.rm=TRUE),
+  dew.point = mean(dew.point, na.rm=TRUE),
+  elev = mean(elev, na.rm=TRUE),
+  lat = mean(lat),
+  lon = mean(lon)
+), by="USAFID"]
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Elevation Categorical Variable
+met_avg[, elev_cat := ifelse(elev > 252, "high", "low")]
+
+## Regional Variable
+# if else logic:
+# met_avg[, region := ifelse(lon > -98 & lat > 39.71, "NE", ifelse(lon > -98, "SE", ifelse(lat > 39.71, "NW", "SW")))]
+# alternatively, combining them:
+met_avg[, region := paste(ifelse(lat > 39.71, "North", "South"), ifelse(lon > -98, "East", "West"))]
+
+table(met_avg$region, useNA="always")
+```
+
+### 3. Use `geom_violin` to examine the wind speed and dew point temperature by region.
+
+You saw how to use `geom_boxplot` in class. Try using `geom_violin` instead (take a look at the help). Hint: You will need to set the `x` aesthetic to 1.
+
+- Use facets.
+- Make sure to deal with `NA` category.
+- Describe what you observe in the graph.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Legend & Ordering
+met_avg[, region := factor(region, levels = c("North West", "North East", "South West", "South East"))]
+
+# Violin Plots
+ggplot(met_avg, aes(x = region, y = wind.sp, fill = region)) +
+  geom_violin(trim = TRUE, na.rm = TRUE) +
+  labs(title = "Wind Speed by Region", x = "Region", y = "Wind Speed") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  facet_wrap(~"Wind Speed")
+
+ggplot(met_avg, aes(x = region, y = dew.point, fill = region)) +
+  geom_violin(trim = TRUE, na.rm = TRUE) +
+  labs(title = "Dew Point Temperature by Region", x = "Region", y = "Dew Point Temperature") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  facet_wrap(~"Dew Point Temperature")
+```
+
+**Description:** In terms of wind speed, the South West region seems to have the highest average and the North East region with the lowest average. Additionally, the wind speed roughly follows a normal distribution for the North West region, and is right-skewed for the South East region. It is also worth mentioning that there might be an outlier in the North East region. For the dew point temperature plot, it shows that the South East region has the highest average dew point temperature, and the variation is relatively small compared to the North West and South West regions. 
+
+
+### 4. Use `geom_jitter` with `stat_smooth` to examine the association between dew point temperature and wind speed by region.
+
+- Color points by region
+- Make sure to deal with `NA` category
+- Fit a linear regression line by region
+- **Describe** what you observe in the graph
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+ggplot(met_avg, aes(x = dew.point, y = wind.sp, color = region)) +
+  geom_jitter(alpha = 0.5, width = 0.2, height = 0.2, na.rm = TRUE) +
+  stat_smooth(method = "lm", se = TRUE, na.rm = TRUE) +
+  labs(title = "Association Between Dew Point Temperature and Wind Speed by Region",
+       x = "Dew Point Temperature (°C)",
+       y = "Wind Speed (m/s)",
+       color = "Region") +
+  theme_minimal()
+
+# Alternative (x, y flipped)
+met_avg |> 
+  filter(!is.na(region), !is.na(dew.point), !is.na(wind.sp)) |>
+  ggplot(mapping = aes(x = wind.sp, y = dew.point, color = region)) +
+  stat_smooth(method = "lm", formula = y ~ x) +
+  geom_jitter() # adds random noise
+
+# Alternative (4 boxes)
+met_avg |> 
+  filter(!is.na(region), !is.na(dew.point), !is.na(wind.sp)) |>
+  ggplot(mapping = aes(x = wind.sp, y = dew.point, color = region)) +
+  stat_smooth(method = "lm", formula = y ~ x, se = FALSE) + # remove shading
+  geom_jitter(alpha = 0.2) + # reduce visual clutter
+  facet_wrap(~region) + 
+  theme_minimal()
+```
+**Description:** The linear regression lines for the South West and North West regions are almost horizontal, in other words, changing the dew point temperature has almost no effect on the predicted wind speed. This finding is also supported by the scatter plot, where the points are scattered evenly across the plane. In comparison, the North East and South East regions have their points clustered closer to each other, and there are stronger correlations illustrated by the linear regression lines.
+
+
+### 5. Use `geom_bar` to create barplots of the weather stations by elevation category coloured by region.
+
+- Bars by elevation category using `position = "dodge"`
+- Change colors from the default. Color by region using `scale_fill_brewer` see [this](http://rstudio-pubs-static.s3.amazonaws.com/5312_98fc1aba2d5740dd849a5ab797cc2c8d.html)
+- Create nice labels on axes and add a title
+- Try a different theme
+- Describe what you observe in the graph
+- Make sure to deal with `NA`
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+ggplot(met_avg, aes(x = elev_cat, fill = region)) +
+  geom_bar(position = "dodge", na.rm = TRUE) +  # dodge for side-by-side bars
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "Weather Stations by Elevation Category and Region",
+       x = "Elevation Category",
+       y = "# Weather Stations",
+       fill = "Region") +
+  theme_bw() +
+  theme(legend.position = "top")
+
+# Alternative
+met_avg |>
+  filter (!is.na(region), !is.na(elev_cat)) |>
+  ggplot() +
+  geom_bar(mapping = aes(x = elev_cat, fill = region), position = "dodge") +
+  scale_fill_brewer(palette = "Accent") +
+  scale_x_discrete(labels = c("High\n(>252m)", "Low\n(<=252m)")) +
+  labs(title = "Weather Stations by Elevation Category and Region",
+       x = "Elevation Category", y = "# Weather Stations", fill = "Region") +
+  theme_void() +
+  theme(legend.position = "top")
+```
+
+**Description:** We can see that the South East region has the most amount of weather stations, and the North West region with the least amount. The weather stations in the North West region are mostly located at a high elevation, and the South East region is the opposite. Notice the weather stations in the North East region are distributed evenly across high and low elevations.
+
+
+### 6. Use `stat_summary` to examine mean dew point and wind speed by region with standard deviation error bars.
+
+- Make sure to remove `NA`
+- Use fun.data="mean_sdl" in `stat_summary`
+- Add another layer of `stats_summary` but change the geom to `"errorbar"` (see the help).
+- Describe the graph and what you observe
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+met_avg |>
+  filter (!is.na(region), !is.na(dew.point)) |>
+  ggplot(met_avg, mapping = aes(x = region, y = dew.point)) +
+  stat_summary(fun.data = "mean_sdl") +
+  stat_summary(fun.data = "mean_sdl", geom = "errorbar") +
+  labs(title = "Mean Dew Point by Region",
+       x = "", y = expression("Mean Dew Point ("*degree*C*")")) +
+  theme_minimal()
+
+met_avg |>
+  filter (!is.na(region), !is.na(wind.sp)) |>
+  ggplot(met_avg, mapping = aes(x = region, y = wind.sp)) +
+  stat_summary(fun.data = "mean_sdl") +
+  stat_summary(fun.data = "mean_sdl", geom = "errorbar") +
+  labs(title = "Wind Speed by Region",
+       x = "", y = "Wind Speed") +
+  theme_minimal()
+```
+
+**Description:**
+- Dew point temperature: The South East region has the highest average dew point temperature and the North West region has the lowest. The North East and South East regions have smaller error range compared to the North West and South West regions.
+- Wind speed: The West regions have similar averages and the error range of the South West region is a little higher than the North West. The East regions are also similar to each other.
+
+
+### 7. Make a map showing the spatial trend in relative humidity (`rh`) in the US
+
+- Make sure to remove `NA`
+- Use `leaflet()`
+- Make a colour palette with custom colours
+- Use `addMarkers` to include the top 10 places in relative h (hint: this will be useful `rank(-rh) <= 10`)
+- Add a legend
+- Describe trend in RH across the US
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+met_avg2 <- met_avg[!is.na(rh)]
+top10 <- met_avg2[rank(-rh) <= 10]
+
+rh_pal <- colorNumeric(
+  viridisLite::viridis(5, direction = -1),
+  domain = met$rh
+)
+
+leaflet(met_avg2) |>
+  addProviderTiles('OpenStreetMap') |>
+  addCircles(lat = ~lat, lng = ~lon, color = ~rh_pal(rh),
+             label = ~paste0(round(rh, 2), ' rh'),
+             opacity = 1, fillOpacity = 1, radius = 250) |>
+  addMarkers(lat = ~lat, lng = ~lon,
+             label = ~paste0(round(rh, 2), ' rh'),
+             data = top10) |>
+  addLegend('bottomleft', pal = rh_pal, values = met_avg2$rh,
+            title = "Relative Humidity (%)", opacity = 1)
+```
+
+**Description:** The relative humidity generally becomes higher as the region gets closer to the east side. Yet, there are three weather stations at the west side that is in the top ten of the highest relative humidity, with roughly 92.65, 94.48, and 96.14 average rh.
+
+
+### 8. Use a ggplot extension
+
+- Pick and extension (except cowplot) from [here](https://exts.ggplot2.tidyverse.org/gallery/) and make a plot of your choice using the `met` data (or `met_avg`)
+- Might want to try examples that come with the extension first (e.g. `ggtech`, `gganimate`, `ggforce`)
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# install.packages("ggridges")
+library(ggridges)
+met |> 
+  group_by(USAFID, day) |>
+  summarise(temp = mean(temp, na.rm = TRUE), .groups = "drop") |>
+  ggplot() +
+  theme_minimal() +
+  geom_density_ridges(
+    aes(x = temp, y = day, group = day),
+    alpha = 0.5, bandwidth = 0.3
+  ) +
+  scale_y_reverse(breaks = c(1, 15, 31)) +
+  labs(x = expression("Temperature ("*degree*C*")"), y = "",
+       title = "Daily Temperature Distributions in August, 2019 Across the U.S."
+  )
+```
