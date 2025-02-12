@@ -1,0 +1,342 @@
+---
+title: "Homework 01 - Exploratory Data Analysis"
+author: "Sophie Xu"
+date: "January 31, 2025"
+output: 
+  html_document: 
+    highlight: kate
+    theme: cosmo
+---
+
+```{r setup, message=FALSE, echo=FALSE, warning=FALSE}
+#install.packages(c("data.table","leaflet", "reticulate", "lubridate"))
+library(data.table)
+library(leaflet)
+library(lubridate)
+library(tidyverse)
+library(ggplot2)
+#library(reticulate)
+```
+
+### Assignment Overview
+
+This assignment focused on analyzing data from the Toronto Police Department's Public Safety Data Portal, specifically the major crime indicators dataset. The **primary objective** was to explore the most prevalent categories of crime and offenses in Toronto, and determine when and where they are most likely to occur. The analysis followed an exploratory data analysis (EDA) approach as outlined in class.
+
+### 1. Data Reading and Initial Exploration
+
+The first step involved loading the data and examining its dimensions. The dataset consists of 420,200 observations across 31 variables, including information on the date and time of the reported incidents, crime categories, administrative details, and geographic locations.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+full_data <- data.table::fread("Major_Crime_Indicators_Open_Data.csv")
+```
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+dim(full_data)
+# head(full_data)
+str(full_data)
+```
+
+A thorough inspection of suspect variables was then performed to identify missing values and data errors. Notably, suspicious values were found for longitude and latitude, where zero values were clearly outside Toronto’s geographic boundaries. Other missing data points were observed for variables such as OCC_YEAR, OCC_DAY, and OCC_DOY. Further investigation revealed that these missing values were collected from different incidents, and were not entry errors.
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+data <- full_data[, .(MCI_CATEGORY, OFFENCE, 
+                     OCC_YEAR, OCC_MONTH, OCC_DAY, OCC_DOY, OCC_HOUR, 
+                     LOCATION_TYPE, NEIGHBOURHOOD_158, LONG_WGS84, LAT_WGS84)]
+summary(data)
+```
+
+```{r eval=TRUE, echo=TRUE, message=FALSE}
+missing_data <- data[rowSums(is.na(data)) > 0,]
+# head(missing_data)
+mean(is.na(data))
+```
+
+### 2. Data Cleaning
+
+After an initial understanding of the data, we narrowed the dataset to focus on the most prevalent crime categories. The most common crime category was assault, with a total of 153,169 reported cases.
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# Subset the Most Significant Category
+crime_counts <- data[, .N, by = .(MCI_CATEGORY, OFFENCE)]
+setorder(crime_counts, -N)
+top_category <- crime_counts[1]
+print(top_category)
+
+data <- data[MCI_CATEGORY == top_category$MCI_CATEGORY & OFFENCE == top_category$OFFENCE,]
+
+# Transform Key Variables
+setnames(data, old = c("MCI_CATEGORY", "OFFENCE", 
+                       "OCC_YEAR", "OCC_MONTH", "OCC_DAY", "OCC_DOY", "OCC_HOUR", 
+                       "LOCATION_TYPE", "NEIGHBOURHOOD_158", "LONG_WGS84", "LAT_WGS84"),
+               new = c("Crime_Category", "Offence_Title", 
+                       "Year", "Month", "Day", "Day_Of_Year", "Hour", 
+                       "Location_Type", "Neighbourhood", "Longitude", "Latitude"))
+data[, Crime_Category := as.factor(Crime_Category)]
+data[, Offence_Title := as.factor(Offence_Title)]
+data[, Month := as.factor(Month)]
+data[, Location_Type := as.factor(Location_Type)]
+data[, Neighbourhood := as.factor(Neighbourhood)]
+```
+
+Under this subset, certain variables were renamed to improve clarity and facilitate the creation of distribution plots for preliminary outlier detection. The histograms of latitude and longitude revealed zero values, which according to the documentation, are unspecified areas. They have been correctly encoded as NaN values. We also observed limited data for years prior to 2010, which was addressed in subsequent steps. Additionally, it was found that crime counts were disproportionately high on the first day of each month and the first hour of each day, warranting further investigation.
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# Histogram for Numeric Variables
+plot_numeric <- function(variable, var_name) {
+  hist(variable,
+       main = paste("Histogram of", var_name), 
+       xlab = var_name, 
+       col = "lightblue", 
+       border = "white",
+       breaks = 60)
+}
+```
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# Barplots for Categorical Variables
+plot_categorical <- function(data, name) {
+  if (name == "Month") {
+    levels <- c("January", "February", "March", "April", "May", "June", 
+                "July", "August", "September", "October", "November", "December")
+    data <- factor(data, levels = levels, ordered = TRUE)
+  } else if (name == "Neighbourhood") {
+    data <- gsub(".*\\((\\d+)\\).*", "(\\1)", as.character(data))
+  }
+
+  barplot(table(data),
+  main = paste("Barplot of ", name),
+  xlab = name,
+  col = "orange",
+  border = "white",
+  las = 2)
+}
+
+plot_location <- function(data) {
+  data$Location_Type_Short <- gsub("^(\\S+).*", "\\1", data$Location_Type)
+  ggplot(data, aes(x = Location_Type_Short)) +
+    geom_bar(fill = "orange", color = "white") +
+    labs(title = "Barplot of Location Types", x = "") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+}
+```
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# Encode Missing Value
+data$Latitude[data$Latitude == 0] <- NaN
+data$Longitude[data$Longitude == 0] <- NaN
+
+# Inspect Data
+numeric_var = c("Year", "Day", "Day_Of_Year", "Hour", "Longitude", "Latitude")
+for (var_name in numeric_var) {
+  plot_numeric(data[[var_name]], var_name)
+}
+plot_categorical(data$Month, "Month")
+plot_categorical(data$Neighbourhood, "Neighbourhood")
+plot_location(data)
+```
+
+An assumption of a normal distribution indicated that the higher crime counts in the first hour of the day were not outliers, as they fell within three standard deviations of the mean. This observation was supported by external reports (https://www.vivint.com/resources/article/when-does-crime-occur-most) that indicated increased crime during the first hour of the day. However, the unusually high crime counts on the first day of the month were more than three standard deviations from the mean. From further examination, we found that these spikes were primarily due to January 1st, with no indication of data errors. Considering this trend appears across multiple years, and that the date has special significance (new year's day), these entries were retained.
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# Investigate Potential Outliers
+#summary(data[Day == 1, ])
+#summary(data[Hour == 1, ])
+first_day <- unique(data[, .(Crime_Count = .N), by = .(Day)])
+first_hour <- unique(data[, .(Crime_Count = .N), by = .(Hour)])
+ggplot(first_day, aes(x = as.factor(Day), y = Crime_Count)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of Daily Crime Counts",
+       x = "Day of Year", y = "Crime Count") +
+  theme_minimal()
+
+ggplot(first_hour, aes(x = as.factor(Hour), y = Crime_Count)) +
+  geom_boxplot() +
+  labs(title = "Boxplot of Hourly Crime Counts",
+       x = "Hour of Day", y = "Crime Count") +
+  theme_minimal()
+
+# Z-Score
+first_day[, z_score := (Crime_Count - mean(Crime_Count, na.rm = TRUE)) / sd(Crime_Count, na.rm = TRUE)]
+first_hour[, z_score := (Crime_Count - mean(Crime_Count, na.rm = TRUE)) / sd(Crime_Count, na.rm = TRUE)]
+first_day[z_score > 3 | z_score < -3]
+# first_hour[z_score > 3 | z_score < -3]
+```
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+check <- data[Day == 1, ]
+# summary(check[check$Month == "January"])
+plot_categorical(check$Month, "Month")
+
+# Z-Score
+check_month <- unique(check[, .(Crime_Count = .N), by = .(Month)])
+check_month[, z_score := (Crime_Count - mean(Crime_Count, na.rm = TRUE)) / sd(Crime_Count, na.rm = TRUE)]
+check_month[z_score > 3 | z_score < -3]
+```
+
+
+### 3. Data Validation
+
+To make informed decisions regarding the limited data from earlier years, we cross-referenced the dataset with the Appendix A Open Data Summary Table, which confirmed that the Major Crime Indicators dataset is updated quarterly from 2014 to 2024. Since data from before 2014 accounted for only 0.0055% of the total observations, it was deemed incomplete and was excluded from the analysis to ensure a balanced dataset.
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# Impact of Removing Early Data
+early_years_count <- nrow(data[Year < 2014, ])
+percentage_early_years <- (early_years_count / nrow(data))
+print(c(early_years_count, round(percentage_early_years, 4)))
+
+# Remove Incomplete Data
+data <- data[Year >= 2014, ]
+
+plot_numeric(data$Year, "Year")
+```
+
+
+### 4. Summary Statistics: Season
+
+With the data cleaned and validated, we proceeded to investigate seasonal trends in crime in attempt to answer "when are the assaults most likely to occur?" A new "season" variable was created by grouping months into four seasons. A chi-squared test was conducted to assess whether crime counts were evenly distributed across seasons. The results, with a very small p-value, rejected the null hypothesis, confirming that crime counts significantly vary by season. An ANOVA test was performed to compare daily crime counts across seasons, yielding a p-value of 0.001351, which despite a small adjusted R-squared value of 0.033, indicated a statistically significant seasonal effect. Moreover, it was observed that the crime counts were notably higher in the Summer and Fall compared to Winter, a pattern supported by both bar plot heights and the line graph trends.
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# Create Season Variable
+data$Season <- with(data, factor(
+  ifelse(Month %in% c("December", "January", "February"), "Winter",
+  ifelse(Month %in% c("March", "April", "May"), "Spring",
+  ifelse(Month %in% c("June", "July", "August"), "Summer", "Fall"))),
+  levels = c("Winter", "Spring", "Summer", "Fall")
+))
+
+# Summary Statistic
+#summary(data[Season == "Winter"])
+#summary(data[Season == "Spring"])
+#summary(data[Season == "Summer"])
+#summary(data[Season == "Fall"])
+table(data$Season)
+```
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# Chi-Squared Test
+print(chisq.test(table(data$Season)))
+plot_categorical(data$Season, "Season")
+```
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# ANOVA
+day_counts <- unique(data[, .(Crime_Count = .N, Season, Month), by = .(Day_Of_Year)])
+day_counts[, AdjustedDay := ifelse(Month == "December", Day_Of_Year - 335, Day_Of_Year + 31)]
+day_mod <- lm(Crime_Count ~ Season, data = day_counts)
+summary(day_mod)
+print(anova(day_mod))
+
+# Visualization
+ggplot(day_counts, aes(x = AdjustedDay, y = Crime_Count, color = Season)) +
+  geom_line() +
+  labs(title = "Daily Crime Counts by Season",
+       x = "Day of Year (Adjusted)",
+       y = "Crime Count") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+
+### 5. Summary Statistics: Day/Night
+
+Next, we examined whether the time of day (day vs. night) had any influence on crime counts. A "time of day" variable was created, defining day as 6 AM to 6 PM and night as 6 PM to 6 AM. The chi-squared test yielded a p-value of 0.1247, indicating no significant difference in crime counts between day and night. This finding was reinforced by the results of an ANOVA test (p-value = 0.9598) and the linear regression model, which showed minimal significance of the day/night variable. Visual inspection of the bar plot and scatter plot further confirmed the absence of any clear day/night effect on crime distribution.
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# Create Day/Night Variable
+data[, Time_of_Day := factor(ifelse(Hour >= 6 & Hour < 18, "Day", "Night"))]
+
+# Summary Statistic
+#summary(data[Time_of_Day == "Day"])
+#summary(data[Time_of_Day == "Night"])
+table(data$Time_of_Day)
+```
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# Chi-Squared Test
+print(chisq.test(table(data$Time_of_Day)))
+plot_categorical(data$Time_of_Day, "Time_of_Day")
+```
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# ANOVA
+hour_counts <- unique(data[, .(Crime_Count = .N, Time_of_Day), by = Hour])
+hour_mod <- lm(Crime_Count ~ Time_of_Day, data = hour_counts)
+summary(hour_mod)
+print(anova(hour_mod))
+
+# Visualization
+ggplot(hour_counts, aes(x = as.factor(Hour), y = Crime_Count, color = Time_of_Day)) +
+  geom_point(size=2) +
+  labs(title = "Hourly Counts by Day/Night",
+       x = "Hours of the Day",
+       y = "Crime Count") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+
+### 6. Summary Statistics: Neighborhoods
+
+After examining the time factors on crime counts from perspectives of both long and short intervals, the next step involved analyzing crime counts across neighborhoods, using City of Toronto's new 158 neighbourhood structure. The chi-squared test for neighborhood-level differences in crime counts yielded a highly significant result (p-value < 2.2e-16). The bar plot also demonstrated clear variation in crime counts across neighborhoods. Interestingly, the ANOVA test on the daily crime counts shows that there is no significant difference in the average daily crime counts between neighborhoods. This discrepancy suggests that while neighborhoods differ in total crime counts, there are additional factors beyond just the neighborhood that may be influencing crime counts on a daily basis.
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# table(data$Neighbourhood)
+```
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# Chi-Squared Test
+chi_sq <- chisq.test(table(data$Neighbourhood))
+print(chi_sq)
+plot_categorical(data$Neighbourhood, "Neighbourhood")
+```
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# ANOVA
+day_counts <- unique(data[, .(Crime_Count = .N, Neighbourhood), by = Day_Of_Year])
+day_mod <- lm(Crime_Count ~ Neighbourhood, data = day_counts)
+# summary(day_mod)
+print(anova(day_mod))
+```
+
+
+### 8. Exploratory graphs: Map
+
+A map visualization was employed to assist the spatial distribution of crime. The map revealed significant clustering of crime incidents in Toronto's downtown area, with some neighborhoods in North York, Vaughan, and Scarborough also exhibiting higher crime counts.
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# Aggregate Crime Counts by Neighborhood
+nbd_counts <- data |>
+  group_by(Neighbourhood) |>
+  summarise(
+    Crime_Count = n(),
+    lat_mean = mean(Latitude, na.rm = TRUE),
+    lon_mean = mean(Longitude, na.rm = TRUE)
+  )
+
+# Create Map
+pal <- colorNumeric(palette = "YlOrRd", domain = nbd_counts$Crime_Count)
+# pal <- colorNumeric(viridisLite::viridis(5, direction = -1), domain = nbd_counts$Crime_Count)
+leaflet(nbd_counts) |>
+  addProviderTiles('OpenStreetMap') |>
+  addCircleMarkers(
+    lng = ~lon_mean, lat = ~lat_mean,
+    radius = ~log(Crime_Count),
+    color = ~pal(Crime_Count),
+    stroke = FALSE,
+    fillOpacity = 1,
+    popup = ~paste(Neighbourhood, ": ", Crime_Count, " crimes")  # hover
+  ) |>
+  addLegend(
+    position = "bottomright",
+    title = "Crime Count",
+    pal = pal,
+    values = ~Crime_Count,
+    opacity = 0.7
+  )
+```
+
+
+### Conclusion
+
+Through comprehensive data analysis and visualization, we conclude that crime counts in Toronto, particularly for the most popular type, assault, are influenced by seasonal and neighborhood factors. Time of day, however, appears to have no significant impact on crime distribution. These insights provide a better understanding of crime patterns in Toronto, highlighting the importance of considering both temporal and spatial factors when analyzing crime data.
