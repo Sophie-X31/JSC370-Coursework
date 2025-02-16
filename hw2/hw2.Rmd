@@ -1,7 +1,7 @@
 ---
-title: "Homework 01 - Exploratory Data Analysis"
+title: "Homework 02 - Data Visualization, Wrangling and Advanced Regression"
 author: "Sophie Xu"
-date: "January 31, 2025"
+date: "February 16, 2025"
 output: 
   html_document: 
     highlight: kate
@@ -9,334 +9,520 @@ output:
 ---
 
 ```{r setup, message=FALSE, echo=FALSE, warning=FALSE}
-#install.packages(c("data.table","leaflet", "reticulate", "lubridate"))
+# Scraping
+library(rvest)
+library(xml2)
+library(base)
+library(stringr)
+
+# Dataframe
 library(data.table)
+library(dtplyr)
+library(dplyr)
+
+# Visualization
+#install.packages("plotly")
 library(leaflet)
-library(lubridate)
 library(tidyverse)
 library(ggplot2)
-#library(reticulate)
+library(gridExtra)
+library(viridis)
+library(plotly)
+
+# Table
+knitr::opts_chunk$set(include  = TRUE)
+library(kableExtra)
+
+# Model
+library(mgcv)
 ```
 
-### Assignment Overview
+### Introduction
 
-This assignment focused on analyzing data from the Toronto Police Department's Public Safety Data Portal, specifically the major crime indicators dataset. The **primary objective** was to explore the most prevalent categories of crime and offenses in Toronto, and determine when and where they are most likely to occur. The analysis followed an exploratory data analysis (EDA) approach as outlined in class.
+This assignment examines the relationship between alcohol consumption and life expectancy through data analysis. The primary questions of interest are: 
+* Is there an association between life expectancy and alcohol consumption?
+* Is there a difference in the association between life expectancy and alcohol for males and females?
+* How have life expectancy and alcohol consumption changed over time?
+To answer these questions, we perform data wrangling, visualization, and regression analysis.
 
-### 1. Data Reading and Initial Exploration
+### 1 Data Wrangling
 
-The first step involved loading the data and examining its dimensions. The dataset consists of 420,200 observations across 31 variables, including information on the date and time of the reported incidents, crime categories, administrative details, and geographic locations.
+For both datasets, we renamed variables for clarity and extracted relevant variables: country, country code, population, year, sex, life expectancy, and alcohol consumption. In the life expectancy dataset, we consolidated male and female life expectancy into a single column with a corresponding sex variable. The data spans from 1950 to 2023, though some population and life expectancy values are missing. For the alcohol consumption dataset, we excluded records labeled “both sexes” for simplicity. This dataset spans from 2000 to 2019 and has no missing values. We also categorized alcohol consumption into levels based on quartiles. After merging the datasets by country, sex, and year, we obtained a final dataset with 7,492 observations.
 
 ```{r, eval=TRUE, echo=FALSE, message=FALSE}
-full_data <- data.table::fread("Major_Crime_Indicators_Open_Data.csv")
+# Load Data
+df_life <- read.csv("https://ourworldindata.org/grapher/life-expectancy-of-women-vs-life-expectancy-of-men.csv?v=1&csvType=full&useColumnShortNames=true")
+df_alcohol <- data.table::fread("WHOAlcoholTotalPerCapita_2021-09-20v2.csv")
 ```
 
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-dim(full_data)
-# head(full_data)
-str(full_data)
-```
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Data Cleaning: Life Expectancy
+life <- df_life |>
+  select(-c(Entity, owid_region))
 
-A thorough inspection of suspect variables was then performed to identify missing values and data errors. Notably, suspicious values were found for longitude and latitude, where zero values were clearly outside Toronto’s geographic boundaries. Other missing data points were observed for variables such as OCC_YEAR, OCC_DAY, and OCC_DOY. Further investigation revealed that these missing values were collected from different incidents, and were not entry errors.
+life <- life |>
+  rename("Population" = "population__sex_all__age_all__variant_estimates")
 
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-data <- full_data[, .(MCI_CATEGORY, OFFENCE, 
-                     OCC_YEAR, OCC_MONTH, OCC_DAY, OCC_DOY, OCC_HOUR, 
-                     LOCATION_TYPE, NEIGHBOURHOOD_158, LONG_WGS84, LAT_WGS84)]
-summary(data)
-```
-
-```{r eval=TRUE, echo=TRUE, message=FALSE}
-missing_data <- data[rowSums(is.na(data)) > 0,]
-# head(missing_data)
-mean(is.na(data))
-```
-
-### 2. Data Cleaning
-
-After an initial understanding of the data, we narrowed the dataset to focus on the most prevalent crime categories. The most common crime category was assault, with a total of 153,169 reported cases.
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# Subset the Most Significant Category
-crime_counts <- data[, .N, by = .(MCI_CATEGORY, OFFENCE)]
-setorder(crime_counts, -N)
-top_category <- crime_counts[1]
-print(top_category)
-
-data <- data[MCI_CATEGORY == top_category$MCI_CATEGORY & OFFENCE == top_category$OFFENCE,]
-
-# Transform Key Variables
-setnames(data, old = c("MCI_CATEGORY", "OFFENCE", 
-                       "OCC_YEAR", "OCC_MONTH", "OCC_DAY", "OCC_DOY", "OCC_HOUR", 
-                       "LOCATION_TYPE", "NEIGHBOURHOOD_158", "LONG_WGS84", "LAT_WGS84"),
-               new = c("Crime_Category", "Offence_Title", 
-                       "Year", "Month", "Day", "Day_Of_Year", "Hour", 
-                       "Location_Type", "Neighbourhood", "Longitude", "Latitude"))
-data[, Crime_Category := as.factor(Crime_Category)]
-data[, Offence_Title := as.factor(Offence_Title)]
-data[, Month := as.factor(Month)]
-data[, Location_Type := as.factor(Location_Type)]
-data[, Neighbourhood := as.factor(Neighbourhood)]
-```
-
-Under this subset, certain variables were renamed to improve clarity and facilitate the creation of distribution plots for preliminary outlier detection. The histograms of latitude and longitude revealed zero values, which according to the documentation, are unspecified areas. They have been correctly encoded as NaN values. We also observed limited data for years prior to 2010, which was addressed in subsequent steps. Additionally, it was found that crime counts were disproportionately high on the first day of each month and the first hour of each day, warranting further investigation.
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# Histogram for Numeric Variables
-plot_numeric <- function(variable, var_name) {
-  hist(variable,
-       main = paste("Histogram of", var_name), 
-       xlab = var_name, 
-       col = "lightblue", 
-       border = "white",
-       breaks = 60)
-}
-```
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# Barplots for Categorical Variables
-plot_categorical <- function(data, name) {
-  if (name == "Month") {
-    levels <- c("January", "February", "March", "April", "May", "June", 
-                "July", "August", "September", "October", "November", "December")
-    data <- factor(data, levels = levels, ordered = TRUE)
-  } else if (name == "Neighbourhood") {
-    data <- gsub(".*\\((\\d+)\\).*", "(\\1)", as.character(data))
-  }
-
-  barplot(table(data),
-  main = paste("Barplot of ", name),
-  xlab = name,
-  col = "orange",
-  border = "white",
-  las = 2)
-}
-
-plot_location <- function(data) {
-  data$Location_Type_Short <- gsub("^(\\S+).*", "\\1", data$Location_Type)
-  ggplot(data, aes(x = Location_Type_Short)) +
-    geom_bar(fill = "orange", color = "white") +
-    labs(title = "Barplot of Location Types", x = "") +
-    theme_minimal() +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
-}
-```
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# Encode Missing Value
-data$Latitude[data$Latitude == 0] <- NaN
-data$Longitude[data$Longitude == 0] <- NaN
-
-# Inspect Data
-numeric_var = c("Year", "Day", "Day_Of_Year", "Hour", "Longitude", "Latitude")
-for (var_name in numeric_var) {
-  plot_numeric(data[[var_name]], var_name)
-}
-plot_categorical(data$Month, "Month")
-plot_categorical(data$Neighbourhood, "Neighbourhood")
-plot_location(data)
-```
-
-An assumption of a normal distribution indicated that the higher crime counts in the first hour of the day were not outliers, as they fell within three standard deviations of the mean. This observation was supported by external reports (https://www.vivint.com/resources/article/when-does-crime-occur-most) that indicated increased crime during the first hour of the day. However, the unusually high crime counts on the first day of the month were more than three standard deviations from the mean. From further examination, we found that these spikes were primarily due to January 1st, with no indication of data errors. Considering this trend appears across multiple years, and that the date has special significance (new year's day), these entries were retained.
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# Investigate Potential Outliers
-#summary(data[Day == 1, ])
-#summary(data[Hour == 1, ])
-first_day <- unique(data[, .(Crime_Count = .N), by = .(Day)])
-first_hour <- unique(data[, .(Crime_Count = .N), by = .(Hour)])
-ggplot(first_day, aes(x = as.factor(Day), y = Crime_Count)) +
-  geom_boxplot() +
-  labs(title = "Boxplot of Daily Crime Counts",
-       x = "Day of Year", y = "Crime Count") +
-  theme_minimal()
-
-ggplot(first_hour, aes(x = as.factor(Hour), y = Crime_Count)) +
-  geom_boxplot() +
-  labs(title = "Boxplot of Hourly Crime Counts",
-       x = "Hour of Day", y = "Crime Count") +
-  theme_minimal()
-
-# Z-Score
-first_day[, z_score := (Crime_Count - mean(Crime_Count, na.rm = TRUE)) / sd(Crime_Count, na.rm = TRUE)]
-first_hour[, z_score := (Crime_Count - mean(Crime_Count, na.rm = TRUE)) / sd(Crime_Count, na.rm = TRUE)]
-first_day[z_score > 3 | z_score < -3]
-# first_hour[z_score > 3 | z_score < -3]
-```
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-check <- data[Day == 1, ]
-# summary(check[check$Month == "January"])
-plot_categorical(check$Month, "Month")
-
-# Z-Score
-check_month <- unique(check[, .(Crime_Count = .N), by = .(Month)])
-check_month[, z_score := (Crime_Count - mean(Crime_Count, na.rm = TRUE)) / sd(Crime_Count, na.rm = TRUE)]
-check_month[z_score > 3 | z_score < -3]
-```
-
-
-### 3. Data Validation
-
-To make informed decisions regarding the limited data from earlier years, we cross-referenced the dataset with the Appendix A Open Data Summary Table, which confirmed that the Major Crime Indicators dataset is updated quarterly from 2014 to 2024. Since data from before 2014 accounted for only 0.0055% of the total observations, it was deemed incomplete and was excluded from the analysis to ensure a balanced dataset.
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# Impact of Removing Early Data
-early_years_count <- nrow(data[Year < 2014, ])
-percentage_early_years <- (early_years_count / nrow(data))
-print(c(early_years_count, round(percentage_early_years, 4)))
-
-# Remove Incomplete Data
-data <- data[Year >= 2014, ]
-
-plot_numeric(data$Year, "Year")
-```
-
-
-### 4. Summary Statistics: Season
-
-With the data cleaned and validated, we proceeded to investigate seasonal trends in crime in attempt to answer "when are the assaults most likely to occur?" A new "season" variable was created by grouping months into four seasons. A chi-squared test was conducted to assess whether crime counts were evenly distributed across seasons. The results, with a very small p-value, rejected the null hypothesis, confirming that crime counts significantly vary by season. An ANOVA test was performed to compare daily crime counts across seasons, yielding a p-value of 0.001351, which despite a small adjusted R-squared value of 0.033, indicated a statistically significant seasonal effect. Moreover, it was observed that the crime counts were notably higher in the Summer and Fall compared to Winter, a pattern supported by both bar plot heights and the line graph trends.
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# Create Season Variable
-data$Season <- with(data, factor(
-  ifelse(Month %in% c("December", "January", "February"), "Winter",
-  ifelse(Month %in% c("March", "April", "May"), "Spring",
-  ifelse(Month %in% c("June", "July", "August"), "Summer", "Fall"))),
-  levels = c("Winter", "Spring", "Summer", "Fall")
-))
-
-# Summary Statistic
-#summary(data[Season == "Winter"])
-#summary(data[Season == "Spring"])
-#summary(data[Season == "Summer"])
-#summary(data[Season == "Fall"])
-table(data$Season)
-```
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# Chi-Squared Test
-print(chisq.test(table(data$Season)))
-plot_categorical(data$Season, "Season")
-```
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# ANOVA
-day_counts <- unique(data[, .(Crime_Count = .N, Season, Month), by = .(Day_Of_Year)])
-day_counts[, AdjustedDay := ifelse(Month == "December", Day_Of_Year - 335, Day_Of_Year + 31)]
-day_mod <- lm(Crime_Count ~ Season, data = day_counts)
-summary(day_mod)
-print(anova(day_mod))
-
-# Visualization
-ggplot(day_counts, aes(x = AdjustedDay, y = Crime_Count, color = Season)) +
-  geom_line() +
-  labs(title = "Daily Crime Counts by Season",
-       x = "Day of Year (Adjusted)",
-       y = "Crime Count") +
-  theme_minimal() +
-  theme(legend.position = "top")
-```
-
-
-### 5. Summary Statistics: Day/Night
-
-Next, we examined whether the time of day (day vs. night) had any influence on crime counts. A "time of day" variable was created, defining day as 6 AM to 6 PM and night as 6 PM to 6 AM. The chi-squared test yielded a p-value of 0.1247, indicating no significant difference in crime counts between day and night. This finding was reinforced by the results of an ANOVA test (p-value = 0.9598) and the linear regression model, which showed minimal significance of the day/night variable. Visual inspection of the bar plot and scatter plot further confirmed the absence of any clear day/night effect on crime distribution.
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# Create Day/Night Variable
-data[, Time_of_Day := factor(ifelse(Hour >= 6 & Hour < 18, "Day", "Night"))]
-
-# Summary Statistic
-#summary(data[Time_of_Day == "Day"])
-#summary(data[Time_of_Day == "Night"])
-table(data$Time_of_Day)
-```
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# Chi-Squared Test
-print(chisq.test(table(data$Time_of_Day)))
-plot_categorical(data$Time_of_Day, "Time_of_Day")
-```
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# ANOVA
-hour_counts <- unique(data[, .(Crime_Count = .N, Time_of_Day), by = Hour])
-hour_mod <- lm(Crime_Count ~ Time_of_Day, data = hour_counts)
-summary(hour_mod)
-print(anova(hour_mod))
-
-# Visualization
-ggplot(hour_counts, aes(x = as.factor(Hour), y = Crime_Count, color = Time_of_Day)) +
-  geom_point(size=2) +
-  labs(title = "Hourly Counts by Day/Night",
-       x = "Hours of the Day",
-       y = "Crime Count") +
-  theme_minimal() +
-  theme(legend.position = "top")
-```
-
-
-### 6. Summary Statistics: Neighborhoods
-
-After examining the time factors on crime counts from perspectives of both long and short intervals, the next step involved analyzing crime counts across neighborhoods, using City of Toronto's new 158 neighbourhood structure. The chi-squared test for neighborhood-level differences in crime counts yielded a highly significant result (p-value < 2.2e-16). The bar plot also demonstrated clear variation in crime counts across neighborhoods. Interestingly, the ANOVA test on the daily crime counts shows that there is no significant difference in the average daily crime counts between neighborhoods. This discrepancy suggests that while neighborhoods differ in total crime counts, there are additional factors beyond just the neighborhood that may be influencing crime counts on a daily basis.
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# table(data$Neighbourhood)
-```
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# Chi-Squared Test
-chi_sq <- chisq.test(table(data$Neighbourhood))
-print(chi_sq)
-plot_categorical(data$Neighbourhood, "Neighbourhood")
-```
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# ANOVA
-day_counts <- unique(data[, .(Crime_Count = .N, Neighbourhood), by = Day_Of_Year])
-day_mod <- lm(Crime_Count ~ Neighbourhood, data = day_counts)
-# summary(day_mod)
-print(anova(day_mod))
-```
-
-
-### 8. Exploratory graphs: Map
-
-A map visualization was employed to assist the spatial distribution of crime. The map revealed significant clustering of crime incidents in Toronto's downtown area, with some neighborhoods in North York, Vaughan, and Scarborough also exhibiting higher crime counts.
-
-```{r eval=TRUE, echo=FALSE, message=FALSE}
-# Aggregate Crime Counts by Neighborhood
-nbd_counts <- data |>
-  group_by(Neighbourhood) |>
-  summarise(
-    Crime_Count = n(),
-    lat_mean = mean(Latitude, na.rm = TRUE),
-    lon_mean = mean(Longitude, na.rm = TRUE)
+life <- life |>
+  pivot_longer(
+    cols = starts_with("life_expectancy__sex_"),
+    names_to = "Sex",
+    values_to = "Life Expectancy"
   )
 
-# Create Map
-pal <- colorNumeric(palette = "YlOrRd", domain = nbd_counts$Crime_Count)
-# pal <- colorNumeric(viridisLite::viridis(5, direction = -1), domain = nbd_counts$Crime_Count)
-leaflet(nbd_counts) |>
-  addProviderTiles('OpenStreetMap') |>
-  addCircleMarkers(
-    lng = ~lon_mean, lat = ~lat_mean,
-    radius = ~log(Crime_Count),
-    color = ~pal(Crime_Count),
-    stroke = FALSE,
-    fillOpacity = 1,
-    popup = ~paste(Neighbourhood, ": ", Crime_Count, " crimes")  # hover
+life <- life |>
+  mutate(Sex = case_when(
+    grepl("life_expectancy__sex_female__age_0__variant_estimates", Sex) ~ "Female",
+    grepl("life_expectancy__sex_male__age_0__variant_estimates", Sex) ~ "Male"
+  ))
+```
+
+```{r, eval=FALSE, echo=FALSE, message=FALSE}
+summary(life)
+head(life)
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Data Cleaning: Alcohol Consumption
+alcohol <- df_alcohol |>
+  select(-c("WHO Region Code", "WHO Region", "Alcohol total per capita (15+) consumption in liters (string)"))
+
+alcohol <- alcohol |>
+  filter(Sex != "Both sexes")
+
+alcohol <- alcohol |>
+  rename("Code" = "Country Code",
+         "Consumption" = "Alcohol total per capita (15+) consumption in liters (numeric)",
+         "Lower Bound" = "Alcohol total per capita (15+) consumption in liters (low estimation)",
+         "Upper Bound" = "Alcohol total per capita (15+) consumption in liters (high estimation)"
+         )
+
+alcohol <- alcohol |> select(-c("Lower Bound", "Upper Bound")) # seems like we don't need it
+```
+
+```{r, eval=FALSE, echo=FALSE, message=FALSE}
+summary(alcohol)
+head(alcohol)
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Merge Data
+df <- merge(life, alcohol, by = c("Code", "Year", "Sex")) # all = TRUE
+```
+
+```{r, eval=FALSE, echo=FALSE, message=FALSE}
+summary(df)
+head(df)
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Report Cleaning Results
+knitr::kable(summary(df))
+
+table_data <- data.frame(
+  Stage = c("Life Expectancy: Before Merge", "Life Expectancy: After Collapsing Sex", 
+            "Alcohol: Before Filter", "Alcohol: After filter", "Data: After Merge"),
+  Observations = c(
+    dim(df_life)[1],
+    dim(life)[1],
+    dim(df_alcohol)[1],
+    dim(alcohol)[1],
+    dim(df)[1]
+  )
+)
+knitr::kable(table_data, col.names = c("Stage", "Number of Observations"))
+```
+
+To better understand the data, we calculated the mean and standard deviation of life expectancy and alcohol consumption by year and sex. Life expectancy has increased over time, with females consistently living longer than males (e.g., ~75 vs. ~70 years in 2019). The standard deviation of life expectancy has decreased, with the gender gap narrowing to approximately eight years by 2019. Alcohol consumption, in contrast, has remained relatively stable, with females consistently consuming less than males (~2.5 vs. ~9.3 liters per capita in 2019). Interestingly, the standard deviation of alcohol consumption is nearly equal to the mean, though it declined slightly from 2000 to 2019.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Report Grouped Mean and SD
+summary_table <- df |>
+  group_by(Year, Sex) |>
+  summarize(
+    Mean_Life_Expectancy = mean(`Life Expectancy`, na.rm = TRUE),
+    SD_Life_Expectancy = sd(`Life Expectancy`, na.rm = TRUE),
+    Mean_Alcohol_Consumption = mean(Consumption, na.rm = TRUE),
+    SD_Alcohol_Consumption = sd(Consumption, na.rm = TRUE)
   ) |>
-  addLegend(
-    position = "bottomright",
-    title = "Crime Count",
-    pal = pal,
-    values = ~Crime_Count,
-    opacity = 0.7
-  )
+  ungroup()
+knitr::kable(summary_table, 
+             col.names = c("Year", "Sex", 
+                           "Mean Life Expectancy", "SD Life Expectancy", 
+                           "Mean Alcohol Consumption", "SD Alcohol Consumption"),
+             digits = 3)
 ```
 
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Compute Quartiles
+consumption_quartiles <- df |>
+  group_by(Sex) |>
+  summarize(
+    Q1 = quantile(Consumption, 0.25, na.rm = TRUE),
+    Q3 = quantile(Consumption, 0.75, na.rm = TRUE)
+  )
+
+# Create Categorical Variable
+df <- df |>
+  left_join(consumption_quartiles, by = "Sex") |>
+  mutate(
+    `Consumption Level` = case_when(
+      Consumption <= Q1 ~ "Low",
+      Consumption > Q1 & Consumption <= Q3 ~ "Medium",
+      Consumption > Q3 ~ "High",
+      TRUE ~ NA_character_
+    ),
+    `Consumption Level` = factor(`Consumption Level`, levels = c("Low", "Medium", "High"))
+  )
+df <- df |> select(-c("Q1", "Q3"))
+
+# Validate by Summary Table
+validate <- df |>
+  group_by(Sex, `Consumption Level`) |>
+  summarize(
+    Min_Consumption = min(Consumption, na.rm = TRUE),
+    Max_Consumption = max(Consumption, na.rm = TRUE),
+    Num_Observations = n()
+  ) |>
+  ungroup()
+knitr::kable(validate, 
+             col.names = c("Sex", "Consumption Level", "Min Consumption", 
+                           "Max Consumption", "Number of Observations"))
+```
+
+### 2 Exploring the Data
+
+We first examined variable types and converted character variables to factors for ease of use. We confirmed that each country has a unique country code but found missing data for two countries between 2000 and 2006, which we chose to retain. A summary of the dataset revealed a balanced distribution of sexes, a wide range of life expectancy (12.38 to 87.43 years), and most observations falling into the medium alcohol consumption category. Exploratory visualizations supported these findings. A histogram of life expectancy by alcohol consumption level indicated that life expectancy modes were similar across all three consumption levels, suggesting that alcohol consumption may not be a strong predictor of life expectancy variation.
+
+```{r, eval=FALSE, echo=FALSE, message=FALSE}
+## check dimensions & variable types
+str(df) 
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+## check dimensions & variable types
+df <- df |> 
+  mutate(across(where(is.character), as.factor))
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+## take a closer look & validate
+check_mapping <- paste("Unique Codes:", length(unique(df$Code)), 
+            "Unique Countries", length(unique(df$Country)))
+#print(check_mapping)
+country_counts <- df |> group_by(Code) |> summarise(Count = n())
+#summary(country_counts)
+missing <- country_counts[country_counts$Count != 40, ]
+#summary(df[df$Code %in% missing$Code, ])
+#summary(life[life$Code %in% missing$Code, ])
+m <- alcohol[alcohol$Code %in% missing$Code, ]
+ggplot(m, aes(x = Year, y = Consumption, color=Sex, shape = Code)) +
+  geom_point(alpha = 0.5) +
+  labs(x = "Year", y = "Alcohol Consumption", title = "Alcohol Consumption Over Time") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# summary statistics
+knitr::kable(summary(df))
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# visualizations
+ggplot(df, aes(x = Year, y = `Life Expectancy`, color=Sex)) +
+  geom_point(alpha = 0.5) +
+  labs(x = "Year", y = "Life Expectancy", title = "Life Expectancy Over Time") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+ggplot(df, aes(x = Consumption, fill = Sex)) +
+  geom_histogram(bins = 20, alpha = 0.6, color = "white", position = "identity") +
+  
+  geom_vline(data = consumption_quartiles |> filter(Sex == "Female"), 
+             aes(xintercept = Q1), linetype = "dashed", color = "red", alpha = 0.3) +
+  geom_vline(data = consumption_quartiles |> filter(Sex == "Female"), 
+             aes(xintercept = Q3), linetype = "dashed", color = "red", alpha = 0.3) +
+  geom_vline(data = consumption_quartiles |> filter(Sex == "Male"), 
+             aes(xintercept = Q1), linetype = "dashed", color = "blue", alpha = 0.3) +
+  geom_vline(data = consumption_quartiles |> filter(Sex == "Male"),
+             aes(xintercept = Q3), linetype = "dashed", color = "blue", alpha = 0.3) +
+
+  geom_rect(data = consumption_quartiles, 
+            aes(xmin = Q1, xmax = Q3, ymin = 0, ymax = Inf, fill = Sex), 
+            alpha = 0.2, inherit.aes = FALSE) +
+  
+  labs(x = "Alcohol Consumption", y = "Frequency", 
+       title = "Distribution of Alcohol Consumption by Sex") +
+  scale_fill_manual(values = c("Female" = "pink", "Male" = "lightblue")) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+ggplot(df, aes(x = `Life Expectancy`, fill = `Consumption Level`)) +
+  geom_histogram(bins = 30, alpha = 0.8, color = "white") +
+  labs(x = "Life Expectancy", y = "Frequency", 
+       title = "Distribution of Life Expectancy by Consumption Level") +
+  scale_fill_manual(values = c("High" = "darkblue", "Medium" = "blue", "Low" = "lightblue")) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
+
+### 3 Visualization
+
+After gaining insights into the data distribution, we created visualizations to examine the association between life expectancy and alcohol consumption, and the influence of sex and time. A stacked histogram of alcohol consumption by sex showed that females have a smaller range and variance in alcohol consumption compared to males.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+ggplot(df, aes(x = Consumption, fill = Sex)) +
+  geom_histogram(bins = 30, alpha = 0.8, position = "stack", color = "white") +
+  scale_fill_manual(values = c("pink", "lightblue")) + 
+  labs(x = "Alcohol Consumption (liters per capita)", 
+       y = "Frequency", 
+       title = "Stacked Histogram of Alcohol Consumption by Sex") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
+Scatterplots with linear regression lines for 2000, 2010, and 2019 indicated a positive correlation between alcohol consumption and life expectancy—higher alcohol consumption was associated with longer predicted life expectancy. However, over time, the fitted line became less steep, suggesting that an increasing amount of alcohol consumption is needed to observe the same increase in life expectancy.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+df_subset <- df |> filter(Year %in% c(2000, 2010, 2019))
+
+ggplot(df_subset, aes(x = Consumption, y = `Life Expectancy`, color = as.factor(Year))) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  facet_wrap(~ Year) +
+  scale_color_manual(values = c("lightblue", "blue", "darkblue")) +
+  labs(x = "Alcohol Consumption (liters per capita)", 
+       y = "Life Expectancy (years)", 
+       title = "Life Expectancy vs. Alcohol Consumption Over Decades") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"),
+        legend.position = "none")
+```
+We then conducted a regression analysis of life expectancy over time, adjusting for sex, using data from Canada and Japan. The results revealed a strong positive correlation between life expectancy and time, with an adjusted R² of approximately 0.99. Additionally, sex was a significant predictor, with Japan showing a larger life expectancy gap between females and males (-6.57 years) than Canada (-4.48 years).
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+df_subset <- df |> filter(Country %in% c("Canada", "Japan"))
+
+ggplot(df_subset, aes(x = Year, y = `Life Expectancy`, color = Sex)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  facet_wrap(~ Country) +
+  labs(x = "Year", y = "Life Expectancy", 
+       title = "Life Expectancy Over Time: Canada vs. Japan") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"),
+        legend.position = "none")
+
+df$year_centered <- df$Year - 2000
+lm1 <- lm(`Life Expectancy` ~ year_centered + Sex, data = df[df$Country == "Canada", ])
+lm2 <- lm(`Life Expectancy` ~ year_centered + Sex, data = df[df$Country == "Japan", ])
+summary(lm1)
+summary(lm2)
+```
+Next, we examined the top 10 countries with the largest life expectancy gaps in 2000 and 2019. The gap generally narrowed over time, except for the Central African Republic (CAF), which saw a drastic drop in both male and female life expectancy in 2019 (38.77 and 26.39 years, respectively).
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+df_gap_0 <- df |>
+  filter(Year %in% c(2000)) |>
+  group_by(Country) |>
+  summarize(
+    Life_Expectancy_f = sum(`Life Expectancy`[Sex == "Female"], na.rm = TRUE),
+    Life_Expectancy_m = sum(`Life Expectancy`[Sex == "Male"], na.rm = TRUE)
+  ) |>
+  filter(Life_Expectancy_f > 0 & Life_Expectancy_m > 0) |>
+  mutate(Gap = Life_Expectancy_f - Life_Expectancy_m) |>
+  arrange(desc(Gap)) |>
+  slice_head(n = 10)
+
+df_gap_9 <- df |>
+  filter(Year %in% c(2019)) |>
+  group_by(Country) |>
+  summarize(
+    Life_Expectancy_f = sum(`Life Expectancy`[Sex == "Female"], na.rm = TRUE),
+    Life_Expectancy_m = sum(`Life Expectancy`[Sex == "Male"], na.rm = TRUE)
+  ) |>
+  filter(Life_Expectancy_f > 0 & Life_Expectancy_m > 0) |>
+  mutate(Gap = Life_Expectancy_f - Life_Expectancy_m) |>
+  arrange(desc(Gap)) |>
+  slice_head(n = 10)
+
+df_gap <- bind_rows(
+  df_gap_0 |> mutate(Year = 2000),
+  df_gap_9 |> mutate(Year = 2019)
+)
+
+df_gap <- df_gap |>
+  pivot_longer(cols = c(Life_Expectancy_f, Life_Expectancy_m, Gap), 
+               names_to = "Sex", 
+               values_to = "Life Expectancy")
+
+df_gap <- df_gap |>
+  mutate(Sex = factor(case_when(
+    Sex == "Life_Expectancy_f" ~ "Female",
+    Sex == "Life_Expectancy_m" ~ "Male",
+    Sex == "Gap" ~ "Gap"
+  ), levels = c("Female", "Male", "Gap")))
+
+df_gap <- df_gap |>
+  group_by(Year, Country) |>
+  mutate(Gap_Value = `Life Expectancy`[Sex == "Gap"])
+
+df_gap <- df_gap |> 
+  mutate(Country = factor(Country, levels = unique(Country[order(-Gap_Value)])))
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+ggplot(df_gap, 
+       aes(x = `Life Expectancy`, y = reorder(Country, Gap_Value), fill = Sex)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ Year, scales = "free_y") +
+  geom_text(aes(label = round(`Life Expectancy`, 2)), 
+          position = position_dodge(width = 0.8), 
+          vjust = -0.5, size = 2.5) + 
+  scale_fill_manual(values = c("Female" = "pink", "Male" = "lightblue", "Gap" = "gray")) +
+  labs(y = "Country", x = "Life Expectancy (years)", 
+       title = "Top 10 Countries with Largest Life Expectancy Gap by Sex") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
+
+```{r, eval=FALSE, echo=FALSE, message=FALSE}
+### WRONG INTERPRETATION OF QUESTION 6 ###
+df_gap_f <- df |>
+  filter(Year %in% c(2000, 2019), Sex == "Female") |>
+  group_by(Country) |>
+  summarize(
+    Life_Expectancy_2000 = sum(`Life Expectancy`[Year == 2000], na.rm = TRUE),
+    Life_Expectancy_2019 = sum(`Life Expectancy`[Year == 2019], na.rm = TRUE)
+  ) |>
+  filter(Life_Expectancy_2000 > 0 & Life_Expectancy_2019 > 0) |>
+  mutate(Gap = Life_Expectancy_2019 - Life_Expectancy_2000) |>
+  arrange(desc(Gap)) |>
+  slice_head(n = 10)
+
+df_gap_m <- df |>
+  filter(Year %in% c(2000, 2019), Sex == "Male") |>
+  group_by(Country) |>
+  summarize(
+    Life_Expectancy_2000 = sum(`Life Expectancy`[Year == 2000], na.rm = TRUE),
+    Life_Expectancy_2019 = sum(`Life Expectancy`[Year == 2019], na.rm = TRUE)
+  ) |>
+  filter(Life_Expectancy_2000 > 0 & Life_Expectancy_2019 > 0) |>
+  mutate(Gap = Life_Expectancy_2019 - Life_Expectancy_2000) |>
+  arrange(desc(Gap)) |>
+  slice_head(n = 10)
+
+df_gap <- bind_rows(
+  df_gap_f |> mutate(Sex = "Female"),
+  df_gap_m |> mutate(Sex = "Male")
+)
+
+ggplot(df_gap, aes(x = reorder(Country, Gap), y = Gap, fill = Sex)) +
+  geom_col() +
+  facet_wrap(~ Sex) +
+  coord_flip() +
+  labs(x = "Country", y = "Life Expectancy Discrepancy (years)", 
+       title = "Top 10 Countries with Largest Life Expectancy Gap (2019 - 2000)") +
+  scale_fill_manual(values = c("pink", "lightblue")) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"),
+        legend.position = "none")
+```
+
+A boxplot of life expectancy by alcohol consumption level and sex in 2019 showed that medium and low consumption levels resulted in similar life expectancies, while high alcohol consumption was associated with significantly longer life expectancy. Interestingly, females in the high-consumption group exhibited lower variance in life expectancy compared to other groups.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+df_2019 <- df |> filter(Year == 2019)
+ggplot(df_2019, aes(x = `Consumption Level`, y = `Life Expectancy`, fill = Sex)) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("pink", "lightblue")) +
+  labs(x = "Alcohol Consumption Level", 
+       y = "Life Expectancy", 
+       title = "Life Expectancy by Alcohol Consumption Level (2019)") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
+
+Finally, a scatterplot incorporating life expectancy, alcohol consumption, sex, and year illustrated that female data points were more clustered, reflecting their lower alcohol consumption variance. Additionally, life expectancy increased over time, as indicated by the progressive darkening of circle boundaries in the upper region of the data clusters. Among males, alcohol consumption appeared to decline over time, with darker-colored points concentrated on the left side of the plot.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+ggplot(df, aes(y = `Life Expectancy`, x = Consumption, color = Year, fill = Sex)) +
+  geom_point(alpha = 0.6, shape = 21) +
+  facet_wrap(~ Sex) +
+  scale_color_gradient(low = "pink", high = "purple") +
+  scale_fill_manual(values = c("Female" = "orange", "Male" = "lightblue")) +
+  labs(y = "Life Expectancy", x = "Alcohol Consumption", color = "Year", 
+       title = "Life Expectancy vs. Alcohol Consumption Over Time") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
+
+### 4 Advanced Regression
+
+To quantitatively support our findings, we applied multiple regression models. We first fit both linear and cubic models to examine the relationship between life expectancy and alcohol consumption, adjusting for scaled population, year, and sex. Both models yielded similar results. The adjusted R² values (0.243 for the linear model and 0.296 for the cubic model) confirmed our hypothesis that alcohol consumption explains only a small portion of life expectancy variation. The regression results showed that, on average, a female with low alcohol consumption in 2000 had a life expectancy of ~71 years (linear) or ~68 years (cubic), adjusted for population. Medium consumption levels had a minimal, statistically insignificant effect, while high consumption levels significantly increased life expectancy by ~7.97 years (linear) or ~7.61 years (cubic). Over time, females with low alcohol consumption experienced an increase in life expectancy (~0.3 years) per year. Males with low alcohol consumption had a statistically significantly lower life expectancy than females (-5.13 years) in the same year.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+df <- df |>
+  rename("Life_Expectancy" = "Life Expectancy",
+         "Consumption_Level" = "Consumption Level")
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Linear Model
+lm_mod <- lm(Life_Expectancy ~ Consumption_Level + log(Population) + year_centered + Sex, data = df)
+summary(lm_mod)
+
+# GAM
+gam_mod <- gam(Life_Expectancy ~ Consumption_Level + s(log(Population), bs="cr") 
+               + year_centered + Sex, data = df)
+summary(gam_mod)
+```
+
+We also plotted the smooth term for the GAM model. We can see the first peak (around log(Population) ≈ 12) suggests that at lower population levels, life expectancy increases. The dip around log(Population) ≈ 16 could indicate a point where larger populations correlate with lower life expectancy, but this needs deeper investigation. The increase at the right end (high population levels) suggests that the largest countries tend to have higher life expectancy.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Plot GAM
+plot(gam_mod, se = TRUE, main = "Smooth term for Population")
+```
+
+We further examined the relationship by averaging alcohol consumption and life expectancy over time. The predictability of the models declined, with adjusted R² values dropping to 0.160 (linear) and 0.207 (cubic). The results showed that, on average, a female with zero alcohol consumption from 2000–2019 had a life expectancy of ~73 years (linear) or ~71 years (cubic), adjusted for population. A one-unit increase in average alcohol consumption raised female life expectancy by ~0.54 years (linear) or ~0.51 years (cubic). The male-female life expectancy gap increased to ~8.8 years (linear) or ~8.6 years (cubic).
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Remove Year
+df_avg <- df |>
+  group_by(Country, Sex) |>
+  summarize(
+    avg_consumption = mean(Consumption, na.rm = TRUE),
+    avg_life_expectancy = mean(Life_Expectancy, na.rm = TRUE),
+    avg_population = mean(Population, na.rm = TRUE)
+  )
+
+lm_avg <- lm(avg_life_expectancy ~ avg_consumption + log(avg_population) + Sex, data = df_avg)
+summary(lm_avg)
+
+gam_avg <- gam(avg_life_expectancy ~ avg_consumption + s(log(avg_population), bs="cr") 
+               + Sex, data = df_avg)
+summary(gam_avg)
+```
+
+These findings were reinforced by visualizations, where both linear and cubic regression lines indicated a positive relationship between average alcohol consumption and life expectancy. The cubic model better captured the relationship, particularly in the high-consumption region with a larger curve.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Plot Both
+ggplot(df_avg, aes(x = avg_consumption, y = avg_life_expectancy, color = Sex)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, linetype = "dashed", color = "black") +
+  geom_smooth(method = "gam", formula = y ~ s(x), se = TRUE, color = "purple") +
+  labs(x = "Average Alcohol Consumption (liters per capita)", 
+       y = "Average Life Expectancy (years)", 
+       title = "Average Alcohol Consumption vs. Life Expectancy by Sex") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
 
 ### Conclusion
 
-Through comprehensive data analysis and visualization, we conclude that crime counts in Toronto, particularly for the most popular type, assault, are influenced by seasonal and neighborhood factors. Time of day, however, appears to have no significant impact on crime distribution. These insights provide a better understanding of crime patterns in Toronto, highlighting the importance of considering both temporal and spatial factors when analyzing crime data.
+Our analysis suggests a complex relationship between alcohol consumption and life expectancy. While higher alcohol consumption is associated with longer life expectancy, the effect size is small, and other factors likely play a more significant role. Additionally, the life expectancy gap between sexes has narrowed over time, though it remains substantial. Overall, our findings highlight the importance of considering multiple variables when analyzing life expectancy trends. Future research could explore additional socioeconomic and healthcare-related factors to better understand the drivers of life expectancy differences across countries and populations.
