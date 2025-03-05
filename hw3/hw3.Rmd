@@ -1,0 +1,365 @@
+---
+title: "Homework 03 - APIs and Text Mining"
+author: "Sophie Xu"
+date: "March 7, 2025"
+output: github_document
+---
+
+```{r setup, message=FALSE, echo=FALSE, warning=FALSE}
+# Scraping
+library(rvest)
+library(xml2)
+library(base)
+library(stringr)
+
+# Dataframe
+library(data.table)
+library(dtplyr)
+library(dplyr)
+library(reshape2)
+library(jsonlite)
+
+# Visualization
+library(leaflet)
+library(tidyverse)
+library(ggplot2)
+library(ggcorrplot)
+library(gridExtra)
+library(viridis)
+library(plotly)
+library(wordcloud2)
+
+# Table
+knitr::opts_chunk$set(include  = TRUE)
+library(kableExtra)
+
+# Model
+library(mgcv)
+
+# Language
+library(tm)
+library(tidytext)
+library(textdata)
+library(topicmodels)
+library(tokenizers)
+library(stringr)
+```
+
+
+### Introduction
+
+This assignment aims to enhance skills in data retrieval via APIs, exploratory data analysis (EDA), and natural language processing (NLP). The analysis focuses on two datasets: NASA’s Near Earth Objects (NEOs) and CFPM Consumer Complaints.
+
+### 1 NASA Neo
+
+The dataset is retrieved from NASA’s API (https://api.nasa.gov/neo/rest/v1/feed?) using the query parameters: start date, end date, and an API key generated from https://api.nasa.gov/. Particularly, we chose the 7-day timeframe between 2024-12-25 and 2024-12-31. After receiving the data in JSON format, we converted it into a data frame with associated variables including the NEO’s close approach date, its id and name, absolute magnitude, minimum and maximum of its estimated diameter, relative velocity, miss distance, orbiting body, and whether it is hazardous or not. The dataset contained no missing values, with a total of 145 NEOs.
+
+Then, we selected some numeric measurements for further exploration and summarized their mean by date. Note that we created an estimated diameter variable by taking the average of the minimum and maximum estimated diameter for ease of use. The table shows substantial variance in the average size and miss distance, and an unbalanced representation of hazardous NEOs.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# API Data Retrieval
+params <- list(
+  start_date = "2024-12-25",
+  end_date = "2024-12-31",
+  api_key = "USY0rhFmbzvVp47PH2GTtp9pJqRhtjs7PQraV7ak"
+)
+
+response <- httr::GET(
+  url = "https://api.nasa.gov/neo/rest/v1/feed?",
+  query = params
+)
+data <- httr::content(response, as = "text", encoding = "UTF-8")
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE}
+# Extract Elements
+data_json <- fromJSON(data)
+urls <- data_json$links
+num_neos <- data_json$element_count
+neo_objects <- data_json$near_earth_objects
+
+# Transform to Dataframe with Selected Variabls
+neo_data <- list()
+for (date in names(neo_objects)) {
+  neos <- neo_objects[[date]]
+  rows <- data.frame(
+    date = date,
+    id = neos$id,
+    name = neos$name,
+    absolute_magnitude = neos$absolute_magnitude_h,
+    diameter_min = neos$estimated_diameter$kilometers$estimated_diameter_min,
+    diameter_max = neos$estimated_diameter$kilometers$estimated_diameter_max,
+    hazardous = neos$is_potentially_hazardous_asteroid,
+    relative_velocity = as.numeric(
+      neos$close_approach_data[[1]]$relative_velocity$kilometers_per_second),
+    miss_distance = as.numeric(neos$close_approach_data[[1]]$miss_distance$kilometers),
+    orbiting_body = neos$close_approach_data[[1]]$orbiting_body
+  )
+  neo_data <- append(neo_data, list(rows))
+}
+neo_df <- do.call(rbind, neo_data)
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Data Wrangling
+neo_df <- neo_df |> 
+  mutate(estimated_diameter = (diameter_min + diameter_max) / 2,
+         hazardous = factor(ifelse(hazardous, "Yes", "No"), levels = c("No", "Yes")))
+
+summary_tbl <- neo_df |>
+  select(date, estimated_diameter, hazardous, relative_velocity, miss_distance) |>
+  group_by(date) |>
+  summarise(
+    avg_estimated_diameter = mean(estimated_diameter, na.rm = TRUE),
+    avg_velocity = mean(relative_velocity, na.rm = TRUE),
+    avg_miss_distance = mean(miss_distance, na.rm=TRUE),
+    hazardous_count = sum(hazardous == "Yes", na.rm = TRUE),
+    total_count = n()
+  )
+
+knitr::kable(summary_tbl, digits=3)
+print(paste("Total near-Earth objects:", num_neos))
+```
+
+```{r, eval=FALSE, message=FALSE, echo=FALSE}
+#summary(neo_df)
+```
+
+To understand the data, we created a correlation heatmap of all the numeric variables in the dataset. We can see that the minimum, maximum, and mean of estimated diameter are perfectly correlated (corr $\approx$ 1). The absolute magnitude is highly correlated with the diameter (corr $\approx$ -0.79), and the relative velocity is positively correlated with the miss distance (corr $\approx$ 0.82).
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Heapmap Correlation
+neo_numeric_df <- neo_df |> select(-where(is.character), -where(is.factor))
+cor_matrix <- cor(neo_numeric_df, use = "complete.obs")
+ggcorrplot(cor_matrix, 
+           method = "circle",
+           lab = TRUE,
+           lab_size = 3,
+           type = "full",
+           colors = c("lightblue", "white", "lightyellow"),
+           title = "Correlation Heatmap of NEO Variables")
+```
+
+A key question was whether larger or faster NEOs are more hazardous. Through histograms and t-tests, we found that larger NEOs (measured by diameter) are statistically more likely to be hazardous. The t-test showed a significant result (p-value $\approx$ 0.0067). On the other hand, there is no clear pattern in the distribution of velocity. The 95% confidence interval captured zero, indicating that we can not rule out the hypothesis that the relative velocity was not significant in determining hazard status (p-value $\approx$ 0.5291).
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Histograms
+ggplot(neo_df, aes(x = estimated_diameter, fill = hazardous)) +
+  geom_histogram(bins = 35, alpha = 0.8, position = "stack", color = "white") +
+  scale_fill_manual(values = c("No" = "lightblue", "Yes" = "darkblue")) +
+  labs(title = "Distribution of NEO Sizes by Hazardous Status",
+       x = "Estimated Diameter (km)", 
+       y = "Count", 
+       fill = "Hazardous") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+
+ggplot(neo_df, aes(x = relative_velocity, fill = hazardous)) +
+  geom_histogram(bins = 20, alpha = 0.8, position = "stack", color = "white") +
+  scale_fill_manual(values = c("No" = "lightblue", "Yes" = "darkblue")) +
+  labs(title = "Distribution of NEO Velocity by Hazardous Status",
+       x = "Velocity (km/s)", 
+       y = "Count", 
+       fill = "Hazardous") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Test Statistics
+hz <- neo_df |> filter(hazardous == "Yes")
+non_hz <- neo_df |> filter(hazardous == "No")
+
+t.test(hz$estimated_diameter, non_hz$estimated_diameter)
+t.test(hz$relative_velocity, non_hz$relative_velocity)
+```
+
+Then, the difference in the relationship between diameter and velocity by hazardous status is inspected. Due to the limitedness of the unbalanced data, the relationship between diameter and velocity for hazardous NEOs are not very clear from the scatter plot. The logistic regression model again suggests that the estimated diameter plays a significant role in predicting whether a NEO is hazardous (p-value $\approx$ 0.0004), while the relative velocity does not (p-value $\approx$ 0.1950). 
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Scatterplot
+ggplot(neo_df, aes(x = estimated_diameter, y = relative_velocity, color = hazardous)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(values = c("No" = "lightblue", "Yes" = "darkblue")) +
+  labs(title = "Relationship Between Diameter and Velocity by Hazardous Status",
+       x = "Estimated Diameter (km)", 
+       y = "Relative Velocity (km/s)", 
+       color = "Hazardous") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Logistic Regression
+logit_mod <- glm(hazardous ~ estimated_diameter + relative_velocity, 
+                 data = neo_df, family = binomial(link = "logit"))
+summary(logit_mod)
+```
+
+Overall, larger NEOs, based on diameter, are more likely to be classified as hazardous, while the relative velocity does not appear to significantly impact the hazard status.
+
+### 2 CFPM Customer Complaints
+
+The second dataset is retrieved from CFPB’s API (https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1) using the query parameters: data received min, product, and format. Note that we only fetched data since 2024-02-01 and filtered for complaints related to "Credit reporting or other personal consumer reports”, as the full dataset is very large. The CSV data contains 2,750,681 entries and 18 variables, covering both consumer information and complaint details. For the purpose of performing NLP tasks, we will focus on the “Consumer complaint narrative” variable which contains the customers’ complaints in textual format.
+
+```{r, eval=FALSE, echo=FALSE, message=FALSE}
+# API Data Retrieval
+url <- "https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1"
+params <- list(
+  "field" = "complaint_what_happened",
+  "frm" = "0",
+  "size" = "50000",
+  "sort" = "relevance_desc",
+  "format" = "csv",
+  "no_aggs" = "true",
+  "no_highlight" = "false",
+  "date_received_min" = "2024-02-01",
+  "product" = "Credit reporting or other personal consumer reports"
+)
+
+
+response <- httr::GET(url, query = params)
+print(httr::status_code(response))
+
+data <- httr::content(response, as = "text", encoding = "UTF-8")
+print(substr(data, 1, 1000))  # Print the first 500 characters
+
+complaint_data <- fromJSON(data_json, flatten = TRUE)
+```
+
+```{r eval=TRUE, echo=FALSE, message=FALSE}
+# Load Data
+complaint_data <- fread("complaints-2025-02-26_21_02.csv")
+dim(complaint_data)
+summary(complaint_data)
+```
+
+
+We began by tokenizing the complaints to compute the frequency of words. We see that “XXXX” is the most common word, followed by stop words. After removing stop words, numbers, and irrelevant tokens like "XXXX", we identified the top 20 most common words, with “credit” being the most frequent, appearing over 1,400,000 times. We now see words that provides more context for the complaints, such as “inaccurate”, “late”. 
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Tokenize 
+tokens <- complaint_data |>
+  select(Issue, `Consumer complaint narrative`) |>
+  unnest_tokens(word, `Consumer complaint narrative`)
+
+# Remove Stop Words
+tokens <- tokens |>
+  anti_join(stop_words, by = "word") |>
+  filter(!grepl("\\d", word)) |>
+  filter(!grepl("^X+$", word, ignore.case = TRUE))
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Frequency
+tokens_count <- tokens |> count(word, sort = TRUE)
+tokens_count |>
+  slice_max(n, n = 20) |>
+  ggplot(aes(x = reorder(word, n), y = n)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top 20 Most Common Complaint Tokens",
+       x = "Word", y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
+
+
+We then tokenized the complaints into bigrams to extract more insights. The result reveals that "credit report" and "credit reporting" were among the most common, reinforcing the dataset’s focus. Certain combinations are also more meaningful now, such as “identify theft” versus “identity”. 
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Bigrams
+bigrams <- complaint_data$`Consumer complaint narrative` |>
+  tokenize_ngrams(n = 2) |>
+  unlist() |>
+  table() |>
+  as.data.frame()
+colnames(bigrams) <- c("bigram", "frequency")
+
+# Remove Stop Words
+bigrams <- bigrams |> 
+  separate(bigram, into = c("word1", "word2"), sep = " ", remove = FALSE) |>
+  filter(!str_detect(bigram, "['’]")) |>
+  filter(!str_detect(bigram, "[[:digit:]]+")) |>
+  filter(!grepl("^X+$", word1, ignore.case = TRUE), !grepl("^X+$", word2, ignore.case = TRUE)) |>
+  anti_join(stop_words, by = c("word1" = "word")) |>
+  anti_join(stop_words, by = c("word2" = "word")) |>
+  unite(bigram, word1, word2, sep = " ") |>
+  arrange(desc(frequency))
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Frequency
+bigrams |>
+  slice_max(n = 10, order_by = frequency) |>
+  ggplot(aes(x = reorder(bigram, frequency), y = frequency)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top 10 Most Common Complaint Bigrams",
+       x = "Bigram", y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
+
+
+By focusing on the top three issues, we identified key terms that distinguish these complaints. For example, terms like “informationisinaccurate” for “improper use of your report” and “recuperate” for “problem with a company’s investigation into an existing problem” stood out. The frequency of these unique terms dropped significantly compared to the overall frequency, indicating their specificity to the issues.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Top Three Issues
+top_issues <- complaint_data |>
+  count(Issue, sort = TRUE) |>
+  slice_max(n = 3, order_by = n)
+print(top_issues)
+
+tokens_t3 <- tokens |> filter(Issue %in% top_issues$Issue)
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# TF-IDF
+tf_idf <- tokens_t3 |>
+  count(Issue, word, sort = TRUE) |>
+  bind_tf_idf(word, Issue, n) |>
+  arrange(desc(tf_idf))
+
+tf_idf |>
+  group_by(Issue) |>
+  slice_max(n = 5, order_by = tf_idf) |>
+  ungroup() |>
+  knitr::kable()
+```
+
+
+Lastly, a sentiment analysis was conducted, showing that most tokens were neutral, with negative ones slightly more than positive ones. Negative words like "neglect" and "failed" were common, reflecting customer frustration.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Sentiment Analysis
+sentiment_df <- tokens |> 
+  select(word) |>
+  inner_join(get_sentiments("bing"), by = "word")
+sentiment_df |> head(20)
+sentiment_df <- sentiment_df |> count(sentiment)
+
+neutral_count <- nrow(tokens) - sum(sentiment_df$n)
+sentiment_df <- sentiment_df |>
+  add_row(sentiment = "neutral", n = neutral_count)
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Visual
+sentiment_df |>
+  ggplot(aes(x = sentiment, y = n, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  scale_fill_manual(values = c("positive" = "lightblue", 
+                               neutral = "steelblue", "negative" = "darkblue")) +
+  labs(title = "Sentiment Analysis of Consumer Complaints",
+       x = "Sentiment",
+       y = "Word Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
+
+This exercise demonstrated how techniques like n-grams, Term Frequency-Inverse Document Frequency (TF-IDF), and sentiment analysis can significantly improve the depth and relevance of insights derived from the data, helping to focus on more meaningful information.
+
+### Conclusion
+
+This analysis provided valuable insights into both datasets. For NEOs, we determined that size is a more significant factor than velocity in predicting the hazard status of asteroids. In the CFPM consumer complaints dataset, we observed that key terms specific to certain complaints helped distinguish them, and a sentiment analysis highlighted the generally neutral tone of consumer complaints. Both datasets demonstrated the power of combining exploratory data analysis with text mining and NLP techniques to extract meaningful patterns and insights.
