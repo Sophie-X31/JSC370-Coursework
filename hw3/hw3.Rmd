@@ -52,7 +52,7 @@ This assignment aims to enhance skills in data retrieval via APIs, exploratory d
 
 ### 1 NASA Neo
 
-The dataset is retrieved from NASA’s API (https://api.nasa.gov/neo/rest/v1/feed?) using the query parameters: start date, end date, and an API key generated from https://api.nasa.gov/. Particularly, we chose the 7-day timeframe between 2024-12-25 and 2024-12-31. After receiving the data in JSON format, we converted it into a data frame with associated variables including the NEO’s close approach date, its id and name, absolute magnitude, minimum and maximum of its estimated diameter, relative velocity, miss distance, orbiting body, and whether it is hazardous or not. The dataset contained no missing values, with a total of 145 NEOs.
+The dataset is retrieved from NASA’s API (https://api.nasa.gov/neo/rest/v1/feed?) using the query parameters: start date, end date, and an API key generated from https://api.nasa.gov/. Particularly, we chose the 7-day timeframe between 2024-12-25 and 2024-12-31. After receiving the data in JSON format, we converted it into a data frame with associated variables including the NEO’s close approach date, its id and name, absolute magnitude, minimum and maximum of its estimated diameter, relative velocity, miss distance, orbiting body, and whether it is hazardous or not. The dataset contained no missing values, with a total of 146 NEOs.
 
 Then, we selected some numeric measurements for further exploration and summarized their mean by date. Note that we created an estimated diameter variable by taking the average of the minimum and maximum estimated diameter for ease of use. The table shows substantial variance in the average size and miss distance, and an unbalanced representation of hazardous NEOs.
 
@@ -78,7 +78,7 @@ urls <- data_json$links
 num_neos <- data_json$element_count
 neo_objects <- data_json$near_earth_objects
 
-# Transform to Dataframe with Selected Variabls
+# Transform to Dataframe with Selected Variables
 neo_data <- list()
 for (date in names(neo_objects)) {
   neos <- neo_objects[[date]]
@@ -140,7 +140,7 @@ ggcorrplot(cor_matrix,
            title = "Correlation Heatmap of NEO Variables")
 ```
 
-A key question was whether larger or faster NEOs are more hazardous. Through histograms and t-tests, we found that larger NEOs (measured by diameter) are statistically more likely to be hazardous. The t-test showed a significant result (p-value $\approx$ 0.0067). On the other hand, there is no clear pattern in the distribution of velocity. The 95% confidence interval captured zero, indicating that we can not rule out the hypothesis that the relative velocity was not significant in determining hazard status (p-value $\approx$ 0.5291).
+A key question was whether larger or faster NEOs are more hazardous. Through histograms and t-tests, we found that larger NEOs (measured by diameter) are statistically more likely to be hazardous. The t-test showed a significant result (p-value $\approx$ 0.0067). On the other hand, there is no clear pattern in the distribution of velocity. The 95% confidence interval captured zero, indicating that we can not rule out the hypothesis that the relative velocity was not significant in determining hazard status (p-value $\approx$ 0.5203).
 
 ```{r, eval=TRUE, echo=FALSE, message=FALSE}
 # Histograms
@@ -174,7 +174,7 @@ t.test(hz$estimated_diameter, non_hz$estimated_diameter)
 t.test(hz$relative_velocity, non_hz$relative_velocity)
 ```
 
-Then, the difference in the relationship between diameter and velocity by hazardous status is inspected. Due to the limitedness of the unbalanced data, the relationship between diameter and velocity for hazardous NEOs are not very clear from the scatter plot. The logistic regression model again suggests that the estimated diameter plays a significant role in predicting whether a NEO is hazardous (p-value $\approx$ 0.0004), while the relative velocity does not (p-value $\approx$ 0.1950). 
+Then, the difference in the relationship between diameter and velocity by hazardous status is inspected. Due to the limitedness of the unbalanced data, the relationship between diameter and velocity for hazardous NEOs are not very clear from the scatter plot. The logistic regression model again suggests that the estimated diameter plays a significant role in predicting whether a NEO is hazardous (p-value $\approx$ 0.0004), while the relative velocity does not (p-value $\approx$ 0.1956). 
 
 ```{r, eval=TRUE, echo=FALSE, message=FALSE}
 # Scatterplot
@@ -200,7 +200,7 @@ Overall, larger NEOs, based on diameter, are more likely to be classified as haz
 
 ### 2 CFPM Customer Complaints
 
-The second dataset is retrieved from CFPB’s API (https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1) using the query parameters: data received min, product, and format. Note that we only fetched data since 2024-02-01 and filtered for complaints related to "Credit reporting or other personal consumer reports”, as the full dataset is very large. The CSV data contains 2,750,681 entries and 18 variables, covering both consumer information and complaint details. For the purpose of performing NLP tasks, we will focus on the “Consumer complaint narrative” variable which contains the customers’ complaints in textual format.
+The second dataset is retrieved from CFPB’s API (https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1) using the query parameters: data received min, product, narrative, and format. Note that we only fetched data since 2024-02-01 and filtered for complaints related to "Credit reporting or other personal consumer reports” and have a narrative, as the full dataset is very large. The CSV data contains 628,690 entries and 18 variables, covering both consumer information and complaint details. For the purpose of performing NLP tasks, we will focus on the “Consumer complaint narrative” variable which contains the customers’ complaints in textual format.
 
 ```{r, eval=FALSE, echo=FALSE, message=FALSE}
 # API Data Retrieval
@@ -217,7 +217,6 @@ params <- list(
   "product" = "Credit reporting or other personal consumer reports"
 )
 
-
 response <- httr::GET(url, query = params)
 print(httr::status_code(response))
 
@@ -229,13 +228,13 @@ complaint_data <- fromJSON(data_json, flatten = TRUE)
 
 ```{r eval=TRUE, echo=FALSE, message=FALSE}
 # Load Data
-complaint_data <- fread("complaints-2025-02-26_21_02.csv")
+complaint_data <- fread("complaints-2025-03-05_17_57.csv")
 dim(complaint_data)
 summary(complaint_data)
 ```
 
 
-We began by tokenizing the complaints to compute the frequency of words. We see that “XXXX” is the most common word, followed by stop words. After removing stop words, numbers, and irrelevant tokens like "XXXX", we identified the top 20 most common words, with “credit” being the most frequent, appearing over 1,400,000 times. We now see words that provides more context for the complaints, such as “inaccurate”, “late”. 
+We began by tokenizing the complaints to compute the frequency of words. We see that “XXXX” is the most common word, followed by stop words. After removing stop words, numbers, and irrelevant tokens like "XXXX", we identified the top 20 most common words, with “credit” being the most frequent, appearing around 1,500,000 times. We now see words that provides more context for the complaints, such as “inaccurate”, “late”. 
 
 ```{r, eval=TRUE, echo=FALSE, message=FALSE}
 # Tokenize 
@@ -329,16 +328,18 @@ tf_idf |>
 ```
 
 
-Lastly, a sentiment analysis was conducted, showing that most tokens were neutral, with negative ones slightly more than positive ones. Negative words like "neglect" and "failed" were common, reflecting customer frustration.
+Lastly, a sentiment analysis was conducted, showing that most tokens were neutral, with negative ones slightly more than positive ones. Negative words like "failed", "harassment", "incorrect" could be associated with customer frustration.
 
 ```{r, eval=TRUE, echo=FALSE, message=FALSE}
 # Sentiment Analysis
 sentiment_df <- tokens |> 
   select(word) |>
   inner_join(get_sentiments("bing"), by = "word")
-sentiment_df |> head(20)
-sentiment_df <- sentiment_df |> count(sentiment)
+sentiment_df |> 
+  distinct(word, .keep_all = TRUE) |>
+  head(20)
 
+sentiment_df <- sentiment_df |> count(sentiment)
 neutral_count <- nrow(tokens) - sum(sentiment_df$n)
 sentiment_df <- sentiment_df |>
   add_row(sentiment = "neutral", n = neutral_count)
