@@ -2,7 +2,7 @@
 title: "Homework 03 - APIs and Text Mining"
 author: "Sophie Xu"
 date: "March 7, 2025"
-output: github_document
+output: html_document
 ---
 
 ```{r setup, message=FALSE, echo=FALSE, warning=FALSE}

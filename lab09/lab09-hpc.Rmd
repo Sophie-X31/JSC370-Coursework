@@ -1,6 +1,6 @@
 ---
 title: "Lab 9 - HPC"
-output: github_document
+output: html_document
 link-citations: yes
 ---
 
@@ -60,7 +60,7 @@ microbenchmark::microbenchmark(
 
 How much faster?
 
-_The second function utilizing matrices is much faster than the first one (29,300 ns < 446, 600 ns)._
+_The second function utilizing matrices is 10x faster than the first one._
 
 
 2.  Find the column max (hint: Checkout the function `max.col()`).
@@ -181,7 +181,7 @@ system.time(my_boot(dat = data.frame(x, y), my_stat, R = 4000, ncpus = 1L))
 system.time(my_boot(dat = data.frame(x, y), my_stat, R = 4000, ncpus = 8L))
 ```
 
-_The parallel version indeed runs faster than the non-parallel version (3.99s < 4.55s)._
+_The parallel version indeed runs faster than the non-parallel version._
 
 ## Problem 4: Compile this markdown document using Rscript
 

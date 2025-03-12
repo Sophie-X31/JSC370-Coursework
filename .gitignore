@@ -1,0 +1,6 @@
+# Omit Final Project
+final_project/
+
+# Large Data Files
+*.csv
+*.gz
