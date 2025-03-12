@@ -1,0 +1,341 @@
+---
+title: "Lab 10 - Trees, Bagging, RF, Boosting, XGBoost"
+output: html_document
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(eval = F, include  = T, echo = T)
+```
+
+# Learning goals
+
+- Perform classification and regression with tree-based methods in R
+- Recognize that tree-based methods are capable of capturing non-linearities by splitting multiple times on the same variables
+- Compare the performance of classification trees, bagging, random forests, and boosting for predicting heart disease based on the ``heart`` data.
+
+# Lab description
+
+For this lab we will be working with the `heart` dataset that you can download from [here](https://github.com/JSC370/JSC370-2025/blob/main/data/heart.csv)
+
+# Deliverables
+
+Questions 1-5 answered, pdf or html output uploaded to Quercus
+
+### Setup packages
+
+You should install and load `rpart` (trees), `randomForest` (random forest), `gbm` (gradient boosting) and `xgboost` (extreme gradient boosting).
+
+
+```{r}
+#install.packages(c("rpart", "rpart.plot", "randomForest", "gbm", "xgboost"))
+```
+
+### Load packages and data
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+library(tidyverse)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(gbm)
+library(xgboost)
+library(caret)
+
+heart <- read_csv("https://raw.githubusercontent.com/JSC370/JSC370-2025/refs/heads/main/data/heart/heart.csv")
+```
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+heart <- heart |>
+  mutate(
+    AHD = 1 * (AHD == "Yes"),
+    ChestPain = factor(ChestPain),
+    Thal = factor(Thal)
+  )
+```
+
+---
+
+
+## Question 1: Trees
+- Split the `heart` data into training and testing (70-30%)
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+set.seed(42)
+smp_size <- floor(0.7 * nrow(heart))
+train_ind <- sample(seq_len(nrow(heart)), size = smp_size)
+train <- heart[train_ind, ]
+test <- heart[-train_ind, ]
+```
+
+- Fit a classification tree using rpart, plot the full tree. We are trying to predict AHD. Set minsplit = 10, minbucket = 3, and do 10 cross validations.
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+heart_tree <- rpart(AHD ~ ., data = train, method = "class", 
+                    control = rpart.control(minsplit = 10, minbucket = 3, cp = 0.00, xval = 10))
+rpart.plot(heart_tree)
+```
+
+- Plot the complexity parameter table for an rpart fit and find the optimal cp
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+plotcp(heart_tree)
+printcp(heart_tree)
+
+optimal_cp <- heart_tree$cptable[which.min(heart_tree$cptable[, "xerror"]), "CP"]
+optimal_cp
+```
+
+- Prune the tree
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+heart_tree_prune <- prune(heart_tree, cp = optimal_cp)
+rpart.plot(heart_tree_prune)
+```
+
+- Compute the test misclassification error
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+#heart_pred <- predict(heart_tree_prune, test, type = "class")
+heart_pred <- predict(heart_tree_prune, test)
+heart_pred <- as.data.frame(heart_pred)
+colnames(heart_pred) <- c("No", "Yes")
+heart_pred$AHD <- ifelse(heart_pred$Yes > 0.5, 1, 0)
+
+conf_mat <- table(test$AHD, heart_pred$AHD)
+conf_mat
+
+misclassification_error <- 1 - sum(diag(conf_mat)) / sum(conf_mat)
+print(misclassification_error)
+```
+
+- Fit the tree with the optimal complexity parameter to the full data (training + testing)
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+heart_tree <- rpart(AHD ~ ., data = heart, method = "class", 
+                    control = rpart.control(cp = optimal_cp))
+rpart.plot(heart_tree)
+```
+
+- Find the Out of Bag (OOB) error for tree
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+oob_error_tree <- min(heart_tree$cptable[, "xerror"])
+print(oob_error_tree)
+```
+
+
+---
+
+## Question 2: Bagging, Random Forest
+
+- Compare the performance of classification trees (above), bagging, random forests for predicting heart disease based on the ``heart`` data.
+
+- Use the training and testing sets from above. Train each of the models on the training data and extract the cross-validation (or out-of-bag error for bagging and Random forest). 
+
+
+- For bagging use ``randomForest`` with ``mtry`` equal to the number of features (all other parameters at their default values). Generate the variable importance plot using ``varImpPlot`` and extract variable importance from the ``randomForest`` fitted object using the ``importance`` function.
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+set.seed(42)
+heart_bag <- randomForest(as.factor(AHD) ~ ., data = train, mtry = ncol(train) - 1,
+                          na.action = na.omit)
+print(sum(heart_bag$err.rate[, 1]))
+
+oob_error_bag <- heart_bag$err.rate[nrow(heart_bag$err.rate), "OOB"]
+print(oob_error_bag)
+
+varImpPlot(heart_bag)
+importance(heart_bag)
+```
+
+- For random forests use ``randomForest`` with the default parameters. Generate the variable importance plot using ``varImpPlot`` and extract variable importance from the ``randomForest`` fitted object using the ``importance`` function.
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+set.seed(42)
+heart_rf <- randomForest(as.factor(AHD) ~ ., data = train, na.action = na.omit)
+print(sum(heart_rf$err.rate[, 1]))
+
+oob_error_forest <- heart_rf$err.rate[nrow(heart_rf$err.rate), "OOB"]
+print(oob_error_forest)
+
+varImpPlot(heart_rf)
+importance(heart_rf)
+```
+
+The error rate reduce from 0.2417582 (tree), to 0.2028986 (bagging), to 0.173913 (random forest).
+
+---
+
+# Question 3: Boosting
+
+- For boosting use `gbm` with ``cv.folds=5`` to perform 5-fold cross-validation, and set ``class.stratify.cv`` to ``AHD`` (heart disease outcome) so that cross-validation is performed stratifying by ``AHD``.  Plot the cross-validation error as a function of the boosting iteration/trees (the `$cv.error` component of the object returned by ``gbm``) and determine whether additional boosting iterations are warranted. If so, run additional iterations with  ``gbm.more`` (use the R help to check its syntax). Choose the optimal number of iterations. Use the ``summary.gbm`` function to generate the variable importance plot and extract variable importance/influence (``summary.gbm`` does both). Generate 1D and 2D marginal plots with ``gbm.plot`` to assess the effect of the top three variables and their 2-way interactions. 
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+set.seed(42)
+heart_boost <- gbm(AHD ~ ., 
+                   data = train, 
+                   distribution = "bernoulli",
+                   n.trees = 3000,
+                   interaction.depth = 1,
+                   shrinkage = 0.01,
+                   cv.folds = 5,
+                   class.stratify.cv = TRUE)
+                   #n.minobsinnode = 10,
+                   #verbose = FALSE)
+```
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+plot(heart_boost$train.error, cex.lab = 2, cex.axis = 2, col="steelblue",
+     type = "l", lwd = 3, ylim = c(0, 1.5), ylab="error")
+lines(heart_boost$cv.error, col="darkblue", lwd=3)
+```
+
+
+---
+
+
+## Question 4: Gradient Boosting
+
+Evaluate the effect of critical boosting parameters (number of boosting iterations, shrinkage/learning rate, and tree depth/interaction).  In ``gbm`` the number of iterations is controlled by ``n.trees`` (default is 100), the shrinkage/learning rate is controlled by ``shrinkage`` (default is 0.001), and interaction depth by ``interaction.depth`` (default is 1).
+
+Note, boosting can overfit if the number of trees is too large. The shrinkage parameter controls the rate at which the boosting learns. Very small $\lambda$ can require using a very large number of trees to achieve good performance. Finally, interaction depth controls the interaction order of the boosted model. A value of 1 implies an additive model, a value of 2 implies a model with up to 2-way interactions, etc. the default is 1.
+
+
+- Set the seed and train a boosting classification with ``gbm`` using 10-fold cross-validation (``cv.folds=10``) on the training data with ``n.trees = 5000``, ``shrinkage = 0.001``, and ``interaction.depth =1``. Plot the cross-validation errors as a function of the boosting iteration and calculate the test MSE.
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+# Model
+set.seed(301)
+heart_boost = gbm(AHD ~ ., data = train, distribution = "bernoulli", n.trees = 5000, interaction.depth = 1, shrinkage = 0.001, cv.folds = 10, class.stratify.cv = TRUE)
+```
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+# Results
+summary(heart_boost)
+plot(heart_boost$train.error, type = "l", col = "steelblue", lwd = 3, 
+     ylim = c(0, 1.5), ylab = "Error", xlab = "Boosting Iterations",
+     main = "Training vs Cross-Validation Error")
+lines(heart_boost$cv.error, col = "darkblue", lwd = 3)
+legend("topright", legend = c("Training Error", "CV Error"), 
+       col = c("steelblue", "darkblue"), lwd = 3)
+```
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+# Prediction
+optimal_trees <- gbm.perf(heart_boost, method = "cv")
+yhat_boost <- predict(heart_boost, test, n.trees = optimal_trees, type = "response")
+yhat_boost_class <- ifelse(yhat_boost > 0.5, "Yes", "No")
+
+# MSE
+test_mse <- mean((as.numeric(test$AHD) - yhat_boost)^2)
+print(paste("Test MSE:", round(test_mse, 4)))
+```
+
+
+- Repeat the above using the same seed and ``n.trees=5000`` with the following 3 additional combination of parameters: a) ``shrinkage = 0.001``, ``interaction.depth = 2``; b) ``shrinkage = 0.01``, ``interaction.depth = 1``; c) ``shrinkage = 0.01``, ``interaction.depth = 2``.
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+set.seed(301)
+heart_boost1 = gbm(AHD ~ ., data = train, distribution = "bernoulli", n.trees = 5000, interaction.depth = 2, shrinkage = 0.001, cv.folds = 10, class.stratify.cv = TRUE)
+summary(heart_boost1)
+
+heart_boost2 = gbm(AHD ~ ., data = train, distribution = "bernoulli", n.trees = 5000, interaction.depth = 1, shrinkage = 0.01, cv.folds = 10, class.stratify.cv = TRUE)
+summary(heart_boost2)
+
+heart_boost3 = gbm(AHD ~ ., data = train, distribution = "bernoulli", n.trees = 5000, interaction.depth = 2, shrinkage = 0.01, cv.folds = 10, class.stratify.cv = TRUE)
+summary(heart_boost3)
+```
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+# Prediction
+optimal_trees <- gbm.perf(heart_boost1, method = "cv")
+yhat_boost <- predict(heart_boost1, test, n.trees = optimal_trees, type = "response")
+yhat_boost_class <- ifelse(yhat_boost > 0.5, "Yes", "No")
+
+# MSE
+test_mse <- mean((as.numeric(test$AHD) - yhat_boost)^2)
+print(paste("Test MSE:", round(test_mse, 4)))
+```
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+# Prediction
+optimal_trees <- gbm.perf(heart_boost2, method = "cv")
+yhat_boost <- predict(heart_boost2, test, n.trees = optimal_trees, type = "response")
+yhat_boost_class <- ifelse(yhat_boost > 0.5, "Yes", "No")
+
+# MSE
+test_mse <- mean((as.numeric(test$AHD) - yhat_boost)^2)
+print(paste("Test MSE:", round(test_mse, 4)))
+```
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+# Prediction
+optimal_trees <- gbm.perf(heart_boost3, method = "cv")
+yhat_boost <- predict(heart_boost3, test, n.trees = optimal_trees, type = "response")
+yhat_boost_class <- ifelse(yhat_boost > 0.5, "Yes", "No")
+
+# MSE
+test_mse <- mean((as.numeric(test$AHD) - yhat_boost)^2)
+print(paste("Test MSE:", round(test_mse, 4)))
+```
+
+
+## Question 5: Extreme Gradient Boosting
+
+Train a XGBoost model with `xgboost` and perform a grid search for tuning the number of trees and the maximum depth of the tree. Also perform 10-fold cross-validation and determine the variable importance. Finally, compute the test MSE.
+
+Tuning parameters
+- max_depth: tree depth, larger makes model more complex and potentially overfit
+- nrounds: number of boosting iterations
+- eta: learning rate (shrinkage)
+- gamma: minimum loss reduction required to make a further partition on a leaf node of the tree. The larger gamma is, the more conservative the algorithm will be (simpler model)
+- min_child_weight: controls the minimum number of samples in a leaf node before further splitting
+- colsample_bytree: controls the fraction of features (variables) used to build each tree. Default is 1 which is all features
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+train_control = trainControl(method = "cv", number = 10, search ="grid")
+tune_grid<-  expand.grid(max_depth = c(1, 3, 5, 7), 
+                        nrounds = (1:10)*50, 
+                        eta = c(0.01,0.1,0.3), 
+                        gamma = 0, 
+                        subsample = 1,
+                        min_child_weight = 1,
+                        colsample_bytree = 0.6 
+                        )
+```
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+train$AHD <- as.factor(train$AHD)
+test$AHD <- as.factor(test$AHD)  
+train$AHD <- factor(train$AHD, levels = c(0, 1), labels = c("No", "Yes"))
+test$AHD <- factor(test$AHD, levels = c(0, 1), labels = c("No", "Yes"))
+```
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+heart_xgb<-caret::train(as.factor(AHD) ~ ., 
+                        data = train,
+                        method="xgbTree",
+                        trControl = train_control,
+                        tuneGrid = tune_grid,
+                        na.action = na.omit,
+                        verbosity = 0)
+```
+
+- Compare the the performance of the different models and summarize
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+varimp <- varImp(heart_xgb, scale = FALSE)
+plot(varimp)
+yhat_xgb <- predict(heart_xgb, newdata = test)
+```
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+test <- heart[-train_ind, ]
+yhat_xgb <- as.numeric(yhat_xgb)
+```
+
+```{r warning=FALSE, message=FALSE, eval=TRUE, echo=TRUE}
+mean((yhat_xgb - test$AHD)^2)
+caret::RMSE(test$AHD, yhat_xgb)
+```
+
+
