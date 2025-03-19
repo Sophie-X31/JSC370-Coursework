@@ -51,10 +51,30 @@ usa_states<-read_csv("https://raw.githubusercontent.com/JSC370/JSC370-2025/refs/
 #head(usa_pop)
 #head(usa_states)
 print(colnames(sb_locs))
+```
+
+    ##  [1] "Store Number"   "Store Name"     "Ownership Type" "Street Address"
+    ##  [5] "City"           "State/Province" "Country"        "Postcode"      
+    ##  [9] "Phone Number"   "Timezone"       "Longitude"      "Latitude"
+
+``` r
 print(colnames(sb_nutr))
+```
+
+    ## [1] "Item"        "Category"    "Calories"    "Fat (g)"     "Carb. (g)"  
+    ## [6] "Fiber (g)"   "Protein (g)"
+
+``` r
 print(colnames(usa_pop))
+```
+
+    ## [1] "state"      "population"
+
+``` r
 print(colnames(usa_states))
 ```
+
+    ## [1] "State"        "Abbreviation"
 
 ### 3. Format and merge the data
 
@@ -101,6 +121,8 @@ p1 <- ggplot(sb_locs_state, aes(x=population, y=nstore, colour=state)) +
 ggplotly(p1)
 ```
 
+![](lab11-interactive-viz1_files/figure-gfm/unnamed-chunk-5-1.png)<!-- -->
+
 - 4a) Answer: Yes, the data points roughly align with a positive
   exponential curve, the number of stores are increasing as the
   population increases.
@@ -112,6 +134,8 @@ p2 <- ggplot(sb_nutr, aes(x=Calories, fill=Category)) +
 
 ggplotly(p2)
 ```
+
+![](lab11-interactive-viz1_files/figure-gfm/unnamed-chunk-6-1.png)<!-- -->
 
 - 4b) Answer: The expected calories of drinks are less than foods from
   the Starbucks menu.
@@ -129,6 +153,8 @@ p3 <- sb_nutr |>
 ggplotly(p3)
 ```
 
+![](lab11-interactive-viz1_files/figure-gfm/unnamed-chunk-7-1.png)<!-- -->
+
 - 4c) Answer: The top 20 words are listed in the bar graph. We can see
   that “iced” is the most frequent word, even higher than “coffee”.
 
@@ -144,6 +170,8 @@ sb_nutr |>
   plot_ly(x = ~Calories, y = ~`Carb. (g)`,
           type = "scatter", mode = "markers", color = ~Category)
 ```
+
+![](lab11-interactive-viz1_files/figure-gfm/unnamed-chunk-8-1.png)<!-- -->
 
 - 5a) Answer: There is a positive trend, the more carbs, the more
   calories. Moreover, food tend to have more calories than drinks.
@@ -166,7 +194,12 @@ topwords <- tokens |>
   head(10)
 
 print(topwords$word)
+```
 
+    ##  [1] "iced"      "bottled"   "tazo"      "sandwich"  "chocolate" "coffee"   
+    ##  [7] "egg"       "starbucks" "tea"       "black"
+
+``` r
 tokens |>
   filter(word %in% topwords$word) |>
   plot_ly(
@@ -185,6 +218,8 @@ tokens |>
     hovermode = "compare"
   )
 ```
+
+![](lab11-interactive-viz1_files/figure-gfm/unnamed-chunk-9-1.png)<!-- -->
 
 - 5b) Answer: The top 10 words are printed, the overall trend is the
   same as the plot above, but the data points are more evenly
@@ -209,6 +244,8 @@ plot_ly(data = sb_nutr_long, x=~word, y=~Value, color = ~Nutrient, type = "box")
          yaxis = list(title = "Nutrition Value"),
          boxmode = "group")
 ```
+
+![](lab11-interactive-viz1_files/figure-gfm/unnamed-chunk-10-1.png)<!-- -->
 
 - 6)  Answer: It seems like sandwich has the most calories and protein
       out of the top items.
@@ -241,6 +278,8 @@ tokens |>
   )
 ```
 
+![](lab11-interactive-viz1_files/figure-gfm/unnamed-chunk-11-1.png)<!-- -->
+
 - 7)  Answer: The relationships between Protein vs Carbs, and Protein vs
       Calories are relatively weak compared to Carbs vs Calories. We can
       see clustering around the trend line between Carbs vs Calories.
@@ -272,14 +311,24 @@ map1 <- plot_geo(sb_locs_state, locationmode = "USA-states") |>
   add_trace(z=~nstore, text=~hover, locations=~state, color=~nstore, colors="Purples") |>
   layout(title = "Starbucks store by state", geo=set_map_details)
 map1
+```
 
+![](lab11-interactive-viz1_files/figure-gfm/unnamed-chunk-12-1.png)<!-- -->
+
+``` r
 map2 <- plot_geo(sb_locs_state, locationmode = "USA-states") |>
   add_trace(z=~population, text=~hover, locations=~state, color=~population, colors="Purples") |>
   layout(title = "Starbucks store by state", geo=set_map_details)
 map2
+```
 
+![](lab11-interactive-viz1_files/figure-gfm/unnamed-chunk-12-2.png)<!-- -->
+
+``` r
 subplot(map1, map2)
 ```
+
+![](lab11-interactive-viz1_files/figure-gfm/unnamed-chunk-12-3.png)<!-- -->
 
 - 8)  Answer: The two plots are very similar, demonstrating the strong
       correlation between population and the number of stores.

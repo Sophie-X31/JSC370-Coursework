@@ -1,6 +1,6 @@
 ---
 title: "Lab 11 - Interactive Visualization"
-output: github_document
+output: html_document
 ---
 
 ```{r setup, echo=FALSE}
@@ -26,7 +26,7 @@ Upload an html file to Quercus and make sure the figures remain interactive.
 
 ### 0. Install and load libraries
 
-```{r message=FALSE, echo=FALSE, warning=FALSE}
+```{r eval=TRUE, message=FALSE, echo=FALSE, warning=FALSE}
 library(tidyverse)
 library(plotly)
 library(widgetframe)
@@ -37,7 +37,7 @@ library(tidytext)
 
 - There are 4 datasets to read in, Starbucks locations, Starbucks nutrition, US population by state, and US state abbreviations. All of them are on the course GitHub.
 
-```{r}
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
 sb_locs <- read_csv("https://raw.githubusercontent.com/JSC370/JSC370-2025/refs/heads/main/data/starbucks/starbucks-locations.csv")
 
 sb_nutr <- read_csv("https://raw.githubusercontent.com/JSC370/JSC370-2025/refs/heads/main/data/starbucks/starbucks-menu-nutrition.csv")
@@ -52,7 +52,7 @@ usa_states<-read_csv("https://raw.githubusercontent.com/JSC370/JSC370-2025/refs/
 - Inspect each dataset to look at variable names and ensure it was imported correctly.
 
 
-```{r}
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
 #head(sb_locs)
 #head(sb_nutr)
 #head(usa_pop)
@@ -70,7 +70,7 @@ print(colnames(usa_states))
 - Merge population in with the store count by state.
 - Inspect the range values for each variable. 
 
-```{r}
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
 sb_usa <- sb_locs |> filter(Country == "US")
 
 sb_locs_state <- sb_usa |>
@@ -98,7 +98,7 @@ Answer the following questions:
 
 - What are the top 20 words in Starbucks menu items? (bar plot)
 
-```{r}
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
 p1 <- ggplot(sb_locs_state, aes(x=population, y=nstore, colour=state)) +
   geom_point(alpha = 0.8) + 
   theme_minimal()
@@ -108,7 +108,7 @@ ggplotly(p1)
 
 - 4a) Answer: Yes, the data points roughly align with a positive exponential curve, the number of stores are increasing as the population increases. 
 
-```{r}
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
 p2 <- ggplot(sb_nutr, aes(x=Calories, fill=Category)) +
   geom_histogram(alpha = 0.5, bins=30) + 
   theme_minimal()
@@ -118,7 +118,7 @@ ggplotly(p2)
 
 - 4b) Answer: The expected calories of drinks are less than foods from the Starbucks menu. 
 
-```{r}
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
 p3 <- sb_nutr |>
   unnest_tokens(word, Item, token="words") |>
   count(word, sort = T) |>
@@ -138,7 +138,7 @@ ggplotly(p3)
 
 - Create a scatterplot using `plot_ly()` representing the relationship between calories and carbs. Color the points by category (food or beverage). Is there a relationship, and do food or beverages tend to have more calories?
 
-```{r, warning=FALSE}
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
 sb_nutr |>
   plot_ly(x = ~Calories, y = ~`Carb. (g)`,
           type = "scatter", mode = "markers", color = ~Category)
@@ -150,7 +150,7 @@ sb_nutr |>
 - Repeat this scatterplot but for the items that include the top 10 words. Color again by category, and add hoverinfo specifying the word in the item name. Add layout information to title the chart and the axes, and enable `hovermode = "compare"`.
 - What are the top 10 words and is the plot much different than above?
 
-```{r, warning=FALSE}
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
 tokens <- sb_nutr |>
   unnest_tokens(word, Item, token="words")
 
@@ -189,7 +189,7 @@ tokens |>
 - Create a boxplot of all of the nutritional variables in groups by the 10 item words.
 - Which top word has the most calories? Which top word has the most protein?
 
-```{r, warning=FALSE}
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
 sb_nutr_long <- tokens |>
   filter(word %in% topwords$word) |>
   pivot_longer(cols = c(Calories, `Fat (g)`, `Carb. (g)`, `Fiber (g)`, `Protein (g)`),
@@ -209,7 +209,7 @@ plot_ly(data = sb_nutr_long, x=~word, y=~Value, color = ~Nutrient, type = "box")
 - Create a 3D scatterplot between Calories, Carbs, and Protein for the items containing the top 10 words
 - Do you see any patterns (clusters or trends)?
 
-```{r, warning=FALSE}
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
 tokens |>
   filter(word %in% topwords$word) |>
   plot_ly(
@@ -239,7 +239,7 @@ tokens |>
 - Create a map to visualize the number of stores per state, and another for the population by state. Add custom hover text. Use subplot to put the maps side by side.
 - Describe the differences if any.
 
-```{r, warning=FALSE}
+```{r eval=TRUE, echo=TRUE, message=FALSE, warning=FALSE}
 # Set up mapping details
 set_map_details <- list(
   scope = 'usa',
