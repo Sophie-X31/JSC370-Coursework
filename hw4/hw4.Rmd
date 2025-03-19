@@ -1,0 +1,207 @@
+---
+title: "Homework 04 - HPC and ML 2"
+author: "Sophie Xu"
+date: "March 26, 2025"
+output: html_document
+---
+
+```{r setup, message=FALSE, echo=FALSE, warning=FALSE}
+# Scraping
+library(rvest)
+library(xml2)
+library(base)
+library(stringr)
+
+# Dataframe
+library(data.table)
+library(dtplyr)
+library(dplyr)
+library(reshape2)
+library(jsonlite)
+
+# Visualization
+library(leaflet)
+library(tidyverse)
+library(ggplot2)
+library(ggcorrplot)
+library(gridExtra)
+library(viridis)
+library(plotly)
+library(wordcloud2)
+
+# Table
+knitr::opts_chunk$set(include  = TRUE)
+library(kableExtra)
+
+# Model
+library(mgcv)
+
+# Language
+library(tm)
+library(tidytext)
+library(textdata)
+library(topicmodels)
+library(tokenizers)
+library(stringr)
+
+# HPC
+library(microbenchmark)
+library(parallel)
+```
+
+
+### Introduction
+
+TEXT
+
+### 1 Parallel Computing
+
+TEXT
+
+```{r, eval=TRUE, echo=TRUE, message=FALSE}
+# Total Sum by Row
+fun1 <- function(mat) {
+  n <- nrow(mat)
+  ans <- double(n)
+  for (i in 1:n) {
+    ans[i] <- sum(mat[i, ])
+  }
+  ans
+}
+
+fun1alt <- function(mat) {
+  # YOUR CODE HERE
+  rowSums(mat)
+}
+
+# Cumulative Sum by Row
+fun2 <- function(mat) {
+  n <- nrow(mat)
+  k <- ncol(mat)
+  ans <- mat
+  for (i in 1:n) {
+    for (j in 2:k) {
+      ans[i,j] <- mat[i, j] + ans[i, j - 1]
+    }
+  }
+  ans
+}
+
+fun2alt <- function(mat) {
+  # YOUR CODE HERE
+  t(apply(mat, 1, cumsum))
+}
+
+# Use the data with this code
+set.seed(2315)
+dat <- matrix(rnorm(200 * 100), nrow = 200)
+
+# Benchmarking
+results <- microbenchmark(
+  fun1(dat),
+  fun1alt(dat),
+  fun2(dat),
+  fun2alt(dat)
+)
+kable(summary(results), digits = 2, format = "markdown", 
+      caption = "Table. 1 Run time comparison of functions with or without vectorization. Units are in microseconds.")
+```
+
+TEXT
+
+3.060000 3.142400 3.144412
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# MC Estimation
+estimate_pi <- function(N) {
+  points <- matrix(runif(2 * N), ncol = 2)
+  inside_circle <- sum(rowSums(points^2) <= 1)
+  4 * inside_circle / N
+}
+
+# Simulation
+N_values <- c(1000, 100000, 1000000)
+pi_estimates <- sapply(N_values, estimate_pi)
+#print(pi_estimates)
+
+# Benchmarking
+results <- microbenchmark(
+  estimate_pi(1000),
+  estimate_pi(100000),
+  estimate_pi(1000000)
+)
+kable(summary(results), digits = 2, format = "markdown", 
+      caption = "Table. 2 Run time comparison of Monte Carlo Estimation of Pi with varying sample sizes (10^3 vs 10^5 vs 10^6). Units are in microseconds.")
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# MC Estimation
+mc_pi <- function(N) {
+  x <- runif(N, -1, 1)
+  y <- runif(N, -1, 1)
+  inside_circle <- sum(x^2 + y^2 <= 1)
+  return(4 * inside_circle / N)
+}
+
+# Simulation Parameters
+num_sims <- 5000
+N <- 100000
+ncores <- 4
+
+# Serial Execution
+serial_pi <- function() {
+  lapply(1:num_sims, function(x) mc_pi(N))
+}
+
+# Parallel Execution
+parallel_pi <- function() {
+  cl <- makeCluster(ncores)
+  clusterSetRNGStream(cl, 42)
+  clusterExport(cl, varlist = c("mc_pi", "N"))
+  result <- parLapply(cl, 1:num_sims, function(x) mc_pi(N))
+  stopCluster(cl)
+  return(result)
+}
+
+# Benchmarking
+results <- microbenchmark(
+  serial = serial_pi(),
+  parallel = parallel_pi()
+)
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Report Summary
+kable(summary(results), digits = 2, format = "markdown", 
+      caption = "Table. 3 Serial versus parallel run times of Monte Carlo Estimation of Pi. Units are in microseconds.")
+
+# Plot Benchmark
+#plot(results)
+ggplot2::autoplot(results) +
+  labs(title = "Top 20 Most Common Complaint Tokens",
+       x = "Word", y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+```
+
+
+### 2 
+
+TEXT
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+
+```
+
+
+### Conclusion
+
+TEXT
