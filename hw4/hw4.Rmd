@@ -1,64 +1,47 @@
 ---
 title: "Homework 04 - HPC and ML 2"
 author: "Sophie Xu"
-date: "March 26, 2025"
+date: "March 28, 2025"
 output: html_document
 ---
 
 ```{r setup, message=FALSE, echo=FALSE, warning=FALSE}
 # Scraping
-library(rvest)
-library(xml2)
-library(base)
-library(stringr)
+library(rvest); library(xml2); library(base)
 
 # Dataframe
-library(data.table)
-library(dtplyr)
-library(dplyr)
-library(reshape2)
-library(jsonlite)
+library(dtplyr); library(dplyr); library(tidyverse)
+library(data.table); library(reshape2); library(jsonlite); library(kableExtra)
 
 # Visualization
-library(leaflet)
-library(tidyverse)
-library(ggplot2)
-library(ggcorrplot)
-library(gridExtra)
-library(viridis)
-library(plotly)
-library(wordcloud2)
-
-# Table
-knitr::opts_chunk$set(include  = TRUE)
-library(kableExtra)
+library(leaflet); library(wordcloud2); library(viridis)
+library(ggplot2); library(ggcorrplot); library(gridExtra); library(plotly)
 
 # Model
 library(mgcv)
 
 # Language
-library(tm)
-library(tidytext)
-library(textdata)
-library(topicmodels)
-library(tokenizers)
-library(stringr)
+library(tm); library(tidytext); library(textdata)
+library(topicmodels); library(tokenizers); library(stringr)
 
 # HPC
-library(microbenchmark)
-library(parallel)
+library(microbenchmark); library(parallel); library(doParallel)
+
+# Trees
+library(randomForest); library(gbm); library(xgboost); library(caret)
+library(rpart); library(rpart.plot)
 ```
 
 
 ### Introduction
 
-TEXT
+This assignment aims to develop proficiency in high-performance computing (HPC) and machine learning (ML). The first section focuses on parallel computing, while the second applies five different models to analyze the Baseball Hitter Stats and Salary dataset.
 
 ### 1 Parallel Computing
 
-TEXT
+1.1 The alternative functions in the following code utilize built-in matrix and vector computation methods to enhance execution speed. Table. 1 demonstrates that the alternative functions consistently outperform the original version across all performance metrics.
 
-```{r, eval=TRUE, echo=TRUE, message=FALSE}
+```{r, eval=TRUE, echo=TRUE, message=FALSE, fig.align='center'}
 # Total Sum by Row
 fun1 <- function(mat) {
   n <- nrow(mat)
@@ -101,17 +84,16 @@ results <- microbenchmark(
   fun1(dat),
   fun1alt(dat),
   fun2(dat),
-  fun2alt(dat)
+  fun2alt(dat),
+  unit = "ms"
 )
 kable(summary(results), digits = 2, format = "markdown", 
-      caption = "Table. 1 Run time comparison of functions with or without vectorization. Units are in microseconds.")
+      caption = "Table. 1 Run time comparison of functions with or without vectorization. Units are in milliseconds.")
 ```
 
-TEXT
+1.2 (a) The following code performs Monte Carlo estimation of $\pi$ for different sample sizes. For varying sample sizes ($10^3$, $10^5$, $10^6$), the estimated values are 3.060000, 3.142400, and 3.144412, respectively. As the sample size increases, the estimate becomes more accurate; however, runtime also scales proportionally (e.g., by a factor of $10^2$, $10^1$).
 
-3.060000 3.142400 3.144412
-
-```{r, eval=TRUE, echo=FALSE, message=FALSE}
+```{r, eval=TRUE, echo=TRUE, message=FALSE, fig.align='center'}
 # MC Estimation
 estimate_pi <- function(N) {
   points <- matrix(runif(2 * N), ncol = 2)
@@ -128,11 +110,14 @@ pi_estimates <- sapply(N_values, estimate_pi)
 results <- microbenchmark(
   estimate_pi(1000),
   estimate_pi(100000),
-  estimate_pi(1000000)
+  estimate_pi(1000000),
+  unit = "ms"
 )
 kable(summary(results), digits = 2, format = "markdown", 
-      caption = "Table. 2 Run time comparison of Monte Carlo Estimation of Pi with varying sample sizes (10^3 vs 10^5 vs 10^6). Units are in microseconds.")
+      caption = "Table. 2 Run time comparison of Monte Carlo Estimation of Pi with varying sample sizes (10^3 vs 10^5 vs 10^6). Units are in milliseconds.")
 ```
+
+1.2 (b) The code below compares Monte Carlo simulations in serial and parallel modes.
 
 ```{r, eval=TRUE, echo=FALSE, message=FALSE}
 # MC Estimation
@@ -142,7 +127,9 @@ mc_pi <- function(N) {
   inside_circle <- sum(x^2 + y^2 <= 1)
   return(4 * inside_circle / N)
 }
+```
 
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
 # Simulation Parameters
 num_sims <- 5000
 N <- 100000
@@ -150,58 +137,332 @@ ncores <- 4
 
 # Serial Execution
 serial_pi <- function() {
-  lapply(1:num_sims, function(x) mc_pi(N))
+  lapply(1:num_sims, function(x) estimate_pi(N))
 }
 
 # Parallel Execution
 parallel_pi <- function() {
   cl <- makeCluster(ncores)
   clusterSetRNGStream(cl, 42)
-  clusterExport(cl, varlist = c("mc_pi", "N"))
-  result <- parLapply(cl, 1:num_sims, function(x) mc_pi(N))
+  clusterExport(cl, varlist = c("estimate_pi", "N"), envir = environment())
+  result <- parLapply(cl, 1:num_sims, function(x) estimate_pi(N))
   stopCluster(cl)
   return(result)
 }
-
-# Benchmarking
-results <- microbenchmark(
-  serial = serial_pi(),
-  parallel = parallel_pi()
-)
 ```
 
 ```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Benchmarking
+serial_results <- microbenchmark(serial = serial_pi(), times = 5, unit = "ms")
+parallel_results <- microbenchmark(parallel = parallel_pi(), times = 5, unit = "ms")
+results <- rbind(serial_results, parallel_results)
+```
+
+Table. 3 confirms that the parallel mode is faster than the serial mode, leveraging four cores to execute tasks simultaneously. Dividing the total runtime in serial mode by 5,000 yields an average runtime similar to the result shown in Table 2. This suggests that running the simulation 5,000 times with a sample size of $10^6$ would likely scale in the same manner as before, meaning the serial runtime would increase by a factor of 10. Similarly, we can estimate that the runtime with a sample size of $10^6$ in parallel mode will also increase by a factor of 10, but it will still be faster than the serial mode due to the lower average runtime per simulation in parallel mode. The plot further supports this observation, showing that the mean parallel runtime is lower than the serial runtime.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE, fig.align='center'}
 # Report Summary
 kable(summary(results), digits = 2, format = "markdown", 
-      caption = "Table. 3 Serial versus parallel run times of Monte Carlo Estimation of Pi. Units are in microseconds.")
+      caption = "Table. 3 Serial versus parallel run times of Monte Carlo Estimation of Pi. Units are in milliseconds.")
 
 # Plot Benchmark
-#plot(results)
-ggplot2::autoplot(results) +
-  labs(title = "Top 20 Most Common Complaint Tokens",
-       x = "Word", y = "Count") +
+ggplot(results, aes(x = expr, y = log(time))) +
+  geom_boxplot(fill = "lightblue2", color = "darkgrey") +
+  labs(x = "Computation Method", y = "Log(Time) (Milliseconds)",
+       title = "Serial vs Parallel Run Times of Monte Carlo Estimation of Pi",
+       caption = "Figure 1: Run Time Comparison") +
   theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"))
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"),
+        plot.caption = element_text(hjust = 0.5, size = 10),
+        axis.text = element_text(size = 9),
+        axis.title = element_text(size = 10))
 ```
 
 
-### 2 
+### 2 Machine Learning
 
-TEXT
+This section applies machine learning to the hitters dataset, which includes 332 observations of major league baseball players and 20 variables, with `Salary` as the response variable. Initially, the dataset is preprocessed by removing entries with missing values in `Salary` and converting character variables into factors. The dataset is then split into 70% training and 30% testing subsets.
 
 ```{r, eval=TRUE, echo=FALSE, message=FALSE}
-
+# Load Data
+url <- "https://raw.githubusercontent.com/JSC370/JSC370-2025/refs/heads/main/data/hitters/hitters.csv"
+hitter <- data.table::fread(url)
 ```
 
 ```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Wrangle Data
+hitter <- hitter[is.finite(hitter$Salary), ]
+hitter <- hitter |> mutate(across(c(League, Division, NewLeague), as.factor))
 
+# Split Data
+set.seed(42)
+train_ind <- sample(seq_len(nrow(hitter)), size = floor(0.7 * nrow(hitter)))
+train <- hitter[train_ind, ]
+test <- hitter[-train_ind, ]
+```
+
+2.1 The first model is a regression tree. The optimal complexity parameter ($\approx 0.0383$) is identified, and the tree is pruned, resulting in an Out-of-Bag (OOB) error of approximately $0.5375$. The visualized tree indicates that `CHits`, `CAtBat`, `RBI`, `AtBat`, `CHmRun`, `PutOuts`, and `CRBI` are the most influential predictors.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE, fig.align='center'}
+# Regression Tree
+tree <- rpart(Salary ~ ., data = train, method = "anova", 
+              control = rpart.control(minsplit = 10, minbucket = 3, cp = 0.01, xval = 10))
+
+# Optimal Complexity Parameter
+#plotcp(tree)
+#printcp(tree)
+optimal_cp <- tree$cptable[which.min(tree$cptable[, "xerror"]), "CP"]
+
+# Prune
+tree <- prune(tree, cp = optimal_cp)
+rpart.plot(tree, main = "Decision Tree Visualization", 
+           sub = "Figure. 2 Pruned decision tree model for predicting salary")
+
+# Prediction
+tree_pred <- predict(tree, test)
+tree_rmse <- sqrt(mean((test$Salary - tree_pred)^2))
+tree_rsq <- 1 - sum((test$Salary - tree_pred)^2) / sum((test$Salary - mean(test$Salary))^2)
+oob_err_tree <- min(tree$cptable[, "xerror"])
+```
+
+2.2 The second model is a bagging approach, yielding an OOB Mean Squared Error (MSE) $\approx 83,109.5485$ and OOB $R^2 \approx 0.5556$. The variable importance plot reveals that the top predictors are similar to those in the regression tree, but ranked differently. For instance, CRBI has the highest increase in node purity but was not the first node in the regression tree.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Bagging
+bagging <- randomForest(Salary ~ ., data = train, mtry = ncol(train) - 1, na.action = na.omit)
+oob_mse_bag <- bagging$mse[length(bagging$mse)]
+oob_rsq_bag <- bagging$rsq[length(bagging$rsq)]
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE, fig.align='center'}
+# Visualization
+#importance(bagging)
+varImpPlot(bagging, 
+           main = "Bagging Model: Variable Importance",
+           sub = "Figure. 3 Ranking features based on their effect on model accuracy for predicting salary",
+           col = "steelblue",
+           pch = 16,
+           cex.main = 0.9,
+           cex.sub = 0.8,
+           cex.lab = 0.8)
+
+# Prediction
+bag_pred <- predict(bagging, test)
+bag_rmse <- sqrt(mean((test$Salary - bag_pred)^2))
+bag_rsq <- 1 - sum((test$Salary - bag_pred)^2) / sum((test$Salary - mean(test$Salary))^2)
+```
+
+2.3 The third model is a random forest, which produces an OOB MSE $\approx 84,597.0298$ and OOB $R^2 \approx 0.5476$. The variable importance plot again aligns closely with the regression tree and bagging model. However, the distribution differs: in the bagging model, the top six variables stand out significantly, whereas in the random forest, only the top four are distinctly separated, with the rest increasing in node purity at a steadier rate.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE, fig.align='center'}
+# Random Forest
+rf <- randomForest(Salary ~ ., data = train, na.action = na.omit)
+oob_mse_rf <- rf$mse[length(rf$mse)]
+oob_rsq_rf <- rf$rsq[length(rf$rsq)]
+
+# Visualization
+#importance(rf)
+varImpPlot(rf, 
+           main = "Random Forest Model: Variable Importance",
+           sub = "Figure. 4 Ranking features based on their effect on model accuracy for predicting salary",
+           col = "steelblue",
+           pch = 16,
+           cex.main = 0.9,
+           cex.sub = 0.8,
+           cex.lab = 0.8)
+
+# Prediction
+rf_pred <- predict(rf, test)
+rf_rmse <- sqrt(mean((test$Salary - rf_pred)^2))
+rf_rsq <- 1 - sum((test$Salary - rf_pred)^2) / sum((test$Salary - mean(test$Salary))^2)
+```
+
+2.4 The fourth model is a boosting approach with 1,000 trees, where the learning rate ($\lambda$) is tuned. The plot shows that training MSE converges as $\lambda$ approaches 0.5, with a substantial reduction from over 75,000 MSE, underscoring the importance of tuning $\lambda$.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Boosting: Tuning Lambda
+lambda_range <- seq(0.001, 0.5, by=0.005)
+train_mse <- data.frame(shrinkage = lambda_range, mse = NA)
+for (i in 1:length(lambda_range)) {
+  boost_model <- gbm(Salary ~ ., 
+                     data = train, 
+                     distribution = "gaussian", 
+                     n.trees = 1000, 
+                     interaction.depth = 1,
+                     shrinkage = lambda_range[i], 
+                     cv.folds = 5, 
+                     n.cores = 4, 
+                     verbose = FALSE)
+  train_mse$mse[i] <- min(boost_model$train.error)
+}
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE, fig.align='center'}
+# Grid Search Results
+ggplot(train_mse, aes(x = shrinkage, y = mse)) +
+  geom_line(color = "steelblue", linewidth = 1, alpha = 0.8) +
+  geom_point(color = "darkblue", size = 1.5, alpha = 0.5) +
+  labs(x = expression("Shrinkage ("*lambda*")"), y = "Training MSE", 
+       title = "Effect of Shrinkage on Training MSE",
+       caption = bquote("Figure. 5 Tuning results of learning rate" ~ lambda)) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"),
+        plot.caption = element_text(hjust = 0.5, size = 10),
+        axis.text = element_text(size = 9),
+        axis.title = element_text(size = 10))
 ```
 
 ```{r, eval=TRUE, echo=FALSE, message=FALSE}
-
+# Optimal Model
+opt_lambda <- train_mse$shrinkage[which.max(train_mse$mse)]
+opt_boost <- gbm(Salary ~ ., 
+                data = train, 
+                distribution = "gaussian", 
+                n.trees = 1000, 
+                interaction.depth = 1,
+                shrinkage = opt_lambda, 
+                cv.folds = 5, 
+                n.cores = 4, 
+                verbose = FALSE)
 ```
 
+The variable importance plot employs a different metric, making direct comparison difficult, but it highlights new influential variables such as Hits, CWalks, and Walks, which were not as prominent in previous models.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE, fig.align='center'}
+# Visualization: Variable Importance
+var_imp <- summary(opt_boost, plotit = FALSE)
+ggplot(var_imp, aes(x = reorder(var, rel.inf), y = rel.inf)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(x = "Variables", y = "Relative Influence",
+       title = "Boosting Model: Variable Importance",
+       caption = "Figure. 6 Importance of each feature based on model contribution") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"),
+        plot.caption = element_text(hjust = 0.5, size = 10),
+        axis.text = element_text(size = 9),
+        axis.title = element_text(size = 10))
+```
+
+Using the optimized learning rate, the final boosting model is plotted below. The curves have not yet converged, suggesting that tuning the number of trees could further enhance performance.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE, fig.align='center'}
+# Visualization: Error Loss Curve
+loss_data <- data.frame(
+  iteration = 1:opt_boost$n.trees, 
+  train_error = opt_boost$train.error,
+  valid_error = opt_boost$cv.error
+)
+ggplot(loss_data, aes(x = iteration)) +
+  geom_line(aes(y = train_error, color = "Training Error"), size = 1) +
+  geom_line(aes(y = valid_error, color = "Validation Error"), size = 1, linetype = "dashed") +
+  scale_color_manual(values = c("Training Error" = "grey", "Validation Error" = "olivedrab")) +
+  labs(x = "Number of Trees", y = "Squared Error Loss",
+       title = "Training Error Across Iterations",
+       caption = "Figure. 7 Training loss as boosting iterations increase") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"),
+        plot.caption = element_text(hjust = 0.5, size = 10),
+        axis.text = element_text(size = 9),
+        axis.title = element_text(size = 10))
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Prediction
+optimal_trees <- gbm.perf(opt_boost, method = "cv", plot.it = FALSE)
+boost_pred <- predict(opt_boost, test, n.trees = optimal_trees, type = "response")
+boost_rmse <- sqrt(mean((test$Salary - boost_pred)^2))
+boost_rsq <- 1 - sum((test$Salary - boost_pred)^2) / sum((test$Salary - mean(test$Salary))^2)
+```
+
+2.5 The fifth model is XGBoost, where hyperparameters are tuned in a parallel setting to accelerate grid search. The plots indicate that the learning rate has a substantial impact on RMSE; for instance, with `lr = 0.01`, RMSE has not fully converged even after 500 rounds. In contrast, the `max_depth` parameter has a lesser effect, primarily influencing the speed of convergence. Rather than optimizing individual hyperparameters in isolation, the focus is on finding optimal hyperparameter combinations. The results suggest that as long as `max_depth` $\geq 2$, the tuning curves behave reasonably (monotonically decreasing), and the learning rate that minimizes RMSE can be selected accordingly.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Parallel Computing
+cl <- makeCluster(detectCores() - 1)
+registerDoParallel(cl)
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Grid Search
+depth_range <- c(1, 2, 4, 6, 8)
+lambda_range <- seq(0.001, 0.3, by=0.03)
+train_control = trainControl(method = "cv", number = 10, search ="grid", allowParallel=TRUE)
+tune_grid <- expand.grid(max_depth = depth_range, 
+                         nrounds = (1:10) * 50, 
+                         eta = lambda_range, 
+                         gamma = 0, 
+                         subsample = 1,
+                         min_child_weight = 1,
+                         colsample_bytree = 0.6
+                         )
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE}
+# Train & Tune XGBoost Model
+xgb <- caret::train(Salary ~ ., 
+                    data = train,
+                    method = "xgbTree",
+                    trControl = train_control,
+                    tuneGrid = tune_grid,
+                    na.action = na.omit,
+                    verbosity = 0)
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE, fig.align='center', fig.height=12, fig.width=9}
+# Grid Search Results
+ggplot(xgb$results, aes(x = nrounds, y = RMSE, color = as.factor(eta))) +
+  geom_line(size = 0.8, alpha = 0.8) +
+  facet_wrap(~ max_depth, nrow = 3, labeller = label_both) +  
+  scale_color_viridis(discrete = TRUE) +
+  labs(x = "Number of Rounds", y = "Root Mean Squared Error (RMSE)", color = "lr",
+       title = "Impact on Error Loss: Max Depth & Learning Rate (lr)",
+       caption = "Figure. 8 Hyperparameter tuning results") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"),
+        plot.caption = element_text(hjust = 0.5, size = 10),
+        axis.text = element_text(size = 9),
+        axis.title = element_text(size = 10))
+```
+
+The variable importance plot reveals differences from prior models, with Years emerging as a key predictor, despite its absence from previous top rankings.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE, fig.align='center'}
+# Visualization
+var_imp <- varImp(xgb, scale = FALSE)$importance
+var_imp_df <- data.frame(Variable = rownames(var_imp), Importance = var_imp[, 1])
+ggplot(var_imp_df, aes(x = reorder(Variable, Importance), y = Importance)) + 
+  geom_bar(stat = "identity", fill = "steelblue") + 
+  coord_flip() +
+  labs(x = "Variables", y = "Importance", 
+       title = "XGBoost Model: Variable Importance",
+       caption = "Figure. 9 Variable importance showing the most influential predictors") +
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, size = 11, face = "bold"),
+        plot.caption = element_text(hjust = 0.5, size = 10),
+        axis.text = element_text(size = 9),
+        axis.title = element_text(size = 10))
+
+# Prediction
+xgb_pred <- predict(xgb, test)
+xgb_rmse <- sqrt(mean((test$Salary - xgb_pred)^2))
+xgb_rsq <- 1 - sum((test$Salary - xgb_pred)^2) / sum((test$Salary - mean(test$Salary))^2)
+```
+
+2.6 The table below presents RMSE and $R^2$ results on the test set, ranking model performance: Bagging > Random Forest > XGBoost > Regression Tree > Boosting. Given its comparable accuracy and lower computational cost, the bagging model is the most effective choice.
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE, fig.align='center'}
+mod_compare <- data.frame(
+  Model = c("Decision Tree", "Bagging", "Random Forest", "Boosting", "XGBoost"),
+  RMSE = c(tree_rmse, bag_rmse, rf_rmse, boost_rmse, xgb_rmse),
+  R_Squared = c(tree_rsq, bag_rsq, rf_rsq, boost_rsq, xgb_rsq)
+)
+
+knitr::kable(mod_compare, digits = 4, caption = "Table. 4 Model Performance Comparison")
+```
+
+Notably, the boosting model performs significantly worse than others, likely due to its variable selection. While regression trees, bagging, and random forests share a similar top predictor set, boosting introduces Hits, CWalks, and Walks, which may not be optimal. XGBoost incorporates fewer new variables and optimizes more hyperparameters, possibly explaining its superior performance compared to boosting.
 
 ### Conclusion
 
-TEXT
+This assignment demonstrated the benefits of parallel computing in speeding up computations and improving efficiency. In machine learning, bagging and random forest outperformed other models, while boosting underperformed due to suboptimal variable selection. Parallel computing was also crucial for accelerating hyperparameter tuning in XGBoost. Overall, leveraging parallelization enhances both computational speed and model optimization in data-driven tasks.
